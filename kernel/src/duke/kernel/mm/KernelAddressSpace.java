@@ -69,6 +69,8 @@ public final class KernelAddressSpace {
             long caching = type == Limine.MEMMAP_FRAMEBUFFER ? PageTable.CACHE_DISABLE | PageTable.WRITE_THROUGH : 0;
             t.mapRange(hhdm + base, base, end - base, PageTable.WRITABLE | nx | caching);
         }
+        // Process tables copy the higher half's PML4 entries once (PageTable.sharingHigherHalf).
+        t.fillHigherHalf();
         Magic.writeCr3(t.root());
         table = t;
     }

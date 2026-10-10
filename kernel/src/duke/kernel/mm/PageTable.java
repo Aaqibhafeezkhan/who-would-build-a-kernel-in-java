@@ -20,12 +20,58 @@ public final class PageTable {
 
     public static final long HUGE_PAGE_SIZE = 2 * 1024 * 1024;
     private static final long ADDRESS_MASK = 0x000F_FFFF_FFFF_F000L;
+    /** PML4 entries per half. */
+    private static final long HIGHER_HALF = 256;
 
     private final long root;
     private int tables = 1;
 
     public PageTable() {
         root = PhysicalMemory.allocateZeroed();
+    }
+
+    /**
+     * A table whose higher half is {@code kernel}'s: the same PDPTs, so mappings the kernel adds
+     * later show up here too, as long as {@code kernel} already has every one of them
+     * ({@link #fillHigherHalf}).
+     */
+    public static PageTable sharingHigherHalf(PageTable kernel) {
+        PageTable t = new PageTable();
+        long half = 8 * HIGHER_HALF;
+        Magic.copyMemory(PhysicalMemory.toVirtual(t.root) + half, PhysicalMemory.toVirtual(kernel.root) + half, half);
+        return t;
+    }
+
+    /** Gives every higher-half PML4 entry a PDPT, so the slot set never changes again. */
+    public void fillHigherHalf() {
+        for (long slot = HIGHER_HALF; slot < 2 * HIGHER_HALF; slot++) {
+            entry(slot << 39 | 0xffff_0000_0000_0000L, 3, true, 0);
+        }
+    }
+
+    /**
+     * Frees every lower-half 4 KiB page and the tables under them, then the root. Only for a table
+     * from {@link #sharingHigherHalf} that no CPU has loaded: the higher half isn't its to free.
+     */
+    public void freeLowerHalf() {
+        freeTables(root, 4, HIGHER_HALF);
+        PhysicalMemory.free(root);
+    }
+
+    private static void freeTables(long table, int level, long entries) {
+        for (int i = 0; i < entries; i++) {
+            long value = Magic.peekLong(PhysicalMemory.toVirtual(table) + 8 * i);
+            if ((value & PRESENT) == 0) {
+                continue;
+            }
+            if (level > 1 && (value & HUGE) != 0) {
+                throw new IllegalStateException("huge page in a lower half being freed");
+            }
+            if (level > 1) {
+                freeTables(value & ADDRESS_MASK, level - 1, 512);
+            }
+            PhysicalMemory.free(value & ADDRESS_MASK);
+        }
     }
 
     /** Physical address of the PML4, for CR3. */

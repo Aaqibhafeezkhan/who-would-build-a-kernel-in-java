@@ -3,9 +3,11 @@ package duke.ktest;
 import static duke.ktest.Assert.assertEquals;
 import static duke.ktest.Assert.assertTrue;
 
+import duke.kernel.Scheduler;
 import duke.kernel.mm.KernelAddressSpace;
 import duke.kernel.mm.PageTable;
 import duke.kernel.mm.PhysicalMemory;
+import duke.kernel.user.AddressSpace;
 import duke.kernel.user.SystemCalls;
 import duke.kernel.user.UserMode;
 import duke.rt.Heap;
@@ -18,26 +20,21 @@ final class UserModeTest {
     private static final int GP = 13;
     private static final int PF = 14;
 
-    // Every program gets addresses nobody used before: unmapping only flushes this CPU's TLB.
-    private static long nextBase = 0x40_0000;
+    /** Where every program's code goes: each has its own address space. */
+    private static final long BASE = 0x40_0000;
 
-    /** A read-only code page at base, an unmapped page, then a writable data and stack page. */
+    /** A read-only code page at BASE, an unmapped page, then a writable data and stack page. */
     private static final class Program {
-        final long base;
-        final long data;
+        final long base = BASE;
+        final long data = BASE + 2 * PAGE;
+        final AddressSpace space = new AddressSpace();
         private final long codeFrame;
         private final long dataFrame;
 
         Program() {
-            base = nextBase;
-            nextBase += 0x10_0000;
-            data = base + 2 * PAGE;
-            codeFrame = PhysicalMemory.allocateZeroed();
-            dataFrame = PhysicalMemory.allocateZeroed();
-            PageTable table = KernelAddressSpace.table();
-            table.map(base, codeFrame, PageTable.USER);
+            codeFrame = space.allocate(base, 0);
             long nx = KernelAddressSpace.noExecuteSupported() ? PageTable.NO_EXECUTE : 0;
-            table.map(data, dataFrame, PageTable.USER | PageTable.WRITABLE | nx);
+            dataFrame = space.allocate(data, PageTable.WRITABLE | nx);
         }
 
         Program load(Code code) {
@@ -51,14 +48,11 @@ final class UserModeTest {
         }
 
         long run() {
-            return UserMode.run(base, data + PAGE);
+            return UserMode.run(space, base, data + PAGE);
         }
 
         void free() {
-            KernelAddressSpace.table().unmap(base);
-            KernelAddressSpace.table().unmap(data);
-            PhysicalMemory.free(codeFrame);
-            PhysicalMemory.free(dataFrame);
+            space.free();
         }
     }
 
@@ -229,7 +223,96 @@ final class UserModeTest {
         assertEquals(7, f.errorCode, "present, write, user");
     }
 
-    // More spinning user programs than CPUs: the main thread only gets to flip their flags if
+    /** Sets data[1], spins until the kernel sets data[0], then exits with {@code status}. */
+    private static Program spinner(int status) {
+        Program p = new Program();
+        // mov byte [data + 1], 1; spin: cmp byte [data], 0; pause; je spin; exit(status)
+        return p.load(new Code().b(0xC6, 0x04, 0x25).imm32(p.data + 1).b(1)
+                .b(0x80, 0x3C, 0x25).imm32(p.data).b(0).b(0xF3, 0x90).b(0x74, 0xF4).exit(status));
+    }
+
+    private static void awaitStart(Program spinner, String name) throws InterruptedException {
+        for (int tries = 0; Magic.peekByte(spinner.kernelView(1)) == 0; tries++) {
+            assertTrue(tries < 500, name + " never started");
+            Thread.sleep(10);
+        }
+    }
+
+    // Both mapped before either runs: on one shared table, the writer would land in the reader's page.
+    static void testAddressSpacesAreSeparate() {
+        Program writer = new Program();
+        Program reader = new Program();
+        try {
+            // mov byte [data], 7; exit(0)
+            writer.load(new Code().b(0xC6, 0x04, 0x25).imm32(writer.data).b(7).exit(0));
+            // movzx edi, byte [data]; exit(edi)
+            reader.load(new Code().b(0x0F, 0xB6, 0x3C, 0x25).imm32(reader.data).movEax(SystemCalls.EXIT).syscall());
+            assertEquals(0, writer.run(), "writer");
+            assertEquals(7, Magic.peekByte(writer.kernelView(0)), "the writer's page");
+            assertEquals(0, Magic.peekByte(reader.kernelView(0)), "the reader's page");
+            assertEquals(0, reader.run(), "what the reader sees");
+        } finally {
+            writer.free();
+            reader.free();
+        }
+    }
+
+    static void testFreeReturnsEveryFrame() {
+        AddressSpace space = new AddressSpace();
+        long before = PhysicalMemory.freeFrames();
+        // Far enough apart to need their own PDPT, PD and PT.
+        space.allocate(BASE, 0);
+        space.allocate(BASE + PAGE, PageTable.WRITABLE);
+        space.allocate(0x7FFF_FFFF_F000L, PageTable.WRITABLE);
+        assertTrue(PhysicalMemory.freeFrames() < before - 3, "pages and tables allocated");
+        space.free();
+        assertEquals(before + 1, PhysicalMemory.freeFrames(), "everything back, root included");
+    }
+
+    static void testLaterKernelMappingsReachEveryProcess() {
+        AddressSpace space = new AddressSpace();
+        // A PML4 slot nothing else uses, so no process could have copied its entry yet.
+        long virtual = 0xffff_e000_0000_0000L;
+        long frame = PhysicalMemory.allocateZeroed();
+        KernelAddressSpace.table().map(virtual, frame, PageTable.WRITABLE);
+        Magic.pokeLong(PhysicalMemory.toVirtual(frame), 99);
+        Magic.disableInterrupts();
+        Scheduler.setPageTable(space.table());
+        long seen = Magic.peekLong(virtual);
+        Scheduler.setPageTable(null);
+        Magic.enableInterrupts();
+        KernelAddressSpace.table().unmap(virtual);
+        PhysicalMemory.free(frame);
+        space.free();
+        assertEquals(99, seen, "read through the process's table");
+    }
+
+    static void testFaultingProcessDiesAlone() throws InterruptedException {
+        Program survivor = spinner(5);
+        long[] status = {-1};
+        Thread survivorThread = new Thread(() -> status[0] = survivor.run());
+        survivorThread.start();
+        awaitStart(survivor, "the survivor");
+        int[] vector = {-1};
+        Thread crasherThread = new Thread(() -> {
+            Program crasher = new Program();
+            try {
+                vector[0] = fault(crasher.load(new Code().b(0xF4))).vector;
+            } catch (AssertionError e) {
+                vector[0] = -2;
+            }
+        });
+        crasherThread.start();
+        crasherThread.join();
+        assertEquals(GP, vector[0], "the crasher's fault");
+        assertTrue(survivorThread.isAlive(), "the survivor is still running");
+        Magic.pokeByte(survivor.kernelView(0), (byte) 1);
+        survivorThread.join();
+        survivor.free();
+        assertEquals(5, status[0], "the survivor's exit status");
+    }
+
+    // More spinning user programs than CPUs, all at the same addresses: the main thread only gets to flip their flags if
     // timer interrupts from ring 3 preempt them, and the collection in between has to stop every
     // CPU that's running one. Each thread's megabyte is referenced only from its kernel stack,
     // so the collection has to walk from ring 3's interrupt frames back into those.
@@ -241,10 +324,7 @@ final class UserModeTest {
         long[] results = new long[count];
         Thread[] threads = new Thread[count];
         for (int i = 0; i < count; i++) {
-            Program p = new Program();
-            // mov byte [data + 1], 1; spin: cmp byte [data], 0; pause; je spin; exit(i)
-            p.load(new Code().b(0xC6, 0x04, 0x25).imm32(p.data + 1).b(1)
-                    .b(0x80, 0x3C, 0x25).imm32(p.data).b(0).b(0xF3, 0x90).b(0x74, 0xF4).exit(i));
+            Program p = spinner(i);
             programs[i] = p;
             int index = i;
             threads[i] = new Thread(() -> {
@@ -256,10 +336,7 @@ final class UserModeTest {
             threads[i].start();
         }
         for (int i = 0; i < count; i++) {
-            for (int tries = 0; Magic.peekByte(programs[i].kernelView(1)) == 0; tries++) {
-                assertTrue(tries < 500, "program " + i + " never started");
-                Thread.sleep(10);
-            }
+            awaitStart(programs[i], "program " + i);
         }
         System.gc();
         assertTrue(Heap.lastLive() - liveBefore > (long) (count - 1) << 20, "every thread's megabyte is live");

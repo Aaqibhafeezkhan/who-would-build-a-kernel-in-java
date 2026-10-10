@@ -1,7 +1,7 @@
 package duke.kernel.user;
 
 import duke.kernel.Console;
-import duke.kernel.mm.KernelAddressSpace;
+import duke.kernel.Scheduler;
 import duke.kernel.mm.PageTable;
 import duke.kernel.mm.PhysicalMemory;
 import duke.kernel.x86.Frame;
@@ -60,12 +60,12 @@ public final class SystemCalls {
         return count;
     }
 
-    /** Whether every page of [address, address + length) is mapped for ring 3. */
+    /** Whether every page of [address, address + length) is mapped for ring 3 in this thread's process. */
     static boolean userReadable(long address, long length) {
         if (address < 0 || length < 0 || length > UserMode.END - address) {
             return false;
         }
-        PageTable table = KernelAddressSpace.table();
+        PageTable table = Scheduler.pageTable();
         long end = address + length;
         for (long page = address & -PhysicalMemory.PAGE_SIZE; page < end; page += PhysicalMemory.PAGE_SIZE) {
             if ((table.flags(page) & PageTable.USER) == 0) {

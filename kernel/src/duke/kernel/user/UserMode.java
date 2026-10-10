@@ -1,5 +1,6 @@
 package duke.kernel.user;
 
+import duke.kernel.Scheduler;
 import duke.kernel.Smp;
 import duke.kernel.x86.Frame;
 import duke.kernel.x86.Gdt;
@@ -71,14 +72,17 @@ public final class UserMode {
     }
 
     /**
-     * Runs the user code at {@code entry} with its stack pointer at {@code stack} until it calls
-     * exit, and returns the exit status. Both must be mapped user-accessible.
+     * Runs the user code at {@code entry} in {@code space} with its stack pointer at {@code stack}
+     * until it calls exit, and returns the exit status. Both must be mapped there.
      */
-    public static long run(long entry, long stack) {
+    public static long run(AddressSpace space, long entry, long stack) {
         long flags = Magic.flags();
         Magic.disableInterrupts();
+        Scheduler.setPageTable(space.table());
         Magic.writeMsr(IA32_KERNEL_GS_BASE, 0);
         long status = Magic.enterUser(entry, stack);
+        // Back on the kernel's table, so space can be freed once this returns.
+        Scheduler.setPageTable(null);
         // Read before interrupts are back on and the thread can move, allocate after: with
         // interrupts off, a collection waiting on this CPU would never get it to stop.
         int cpu = Magic.cpuIndex();

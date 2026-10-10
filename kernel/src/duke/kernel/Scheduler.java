@@ -1,6 +1,8 @@
 package duke.kernel;
 
+import duke.kernel.mm.KernelAddressSpace;
 import duke.kernel.mm.KernelStacks;
+import duke.kernel.mm.PageTable;
 import duke.kernel.time.Timer;
 import duke.rt.Magic;
 import duke.rt.SpinLock;
@@ -59,6 +61,8 @@ public final class Scheduler {
         int monitorCount;
         /** Run queue, or a monitor's blocked or waiting list: a thread is on at most one. */
         Task next;
+        /** The process's table while the thread is in one ({@link #setPageTable}), else null for the kernel's. */
+        PageTable pageTable;
 
         public Task(Thread thread) {
             this.thread = thread;
@@ -433,11 +437,33 @@ public final class Scheduler {
         }
         next.state = RUNNING;
         CURRENT[cpu] = next;
+        if (next.pageTable != previous.pageTable) {
+            Magic.writeCr3(tableOf(next).root());
+        }
         swap(Magic.addressOf(previous.rsp) + Tib.ARRAY_DATA, next.rsp[0]);
         Task self = current();
         Magic.setStackBase(self.stackBottom);
         Magic.setStackLimit(self.stackLimit);
         reap();
+    }
+
+    /**
+     * Loads {@code table} for this thread from now on, here and wherever it's switched back in, or
+     * the kernel's for null. Interrupts must be off, so the thread can't move in between.
+     */
+    public static void setPageTable(PageTable table) {
+        Task self = current();
+        self.pageTable = table;
+        Magic.writeCr3(tableOf(self).root());
+    }
+
+    /** The table this thread runs on. */
+    public static PageTable pageTable() {
+        return tableOf(current());
+    }
+
+    private static PageTable tableOf(Task task) {
+        return task.pageTable != null ? task.pageTable : KernelAddressSpace.table();
     }
 
     /** Only longs in this frame, so the collector can start a parked thread's walk at its caller. */

@@ -56,7 +56,8 @@ CR3. The kernel image is mapped from the compiler's section boundaries (`Magic.i
 text read-only and executable, rodata read-only, data and bss writable, and both NX when the CPU
 has it. The direct map covers every region type Limine maps, with 2 MiB pages where alignment
 allows, and uncached for the framebuffer. The virtual layout is unchanged, so execution simply
-continues.
+continues. Every higher-half PML4 entry gets a PDPT up front (1 MiB), so the slots never change
+and process tables can copy them once and still see everything the kernel maps later.
 
 Last in `Kernel.init()`, the bootloader-reclaimable regions (Limine's page tables, GDT, stack
 and responses) go to the frame allocator: 45 MiB under QEMU's 256M. `Limine.snapshot()` copies
@@ -207,8 +208,8 @@ the heap and thread stacks both draw from.
 
 ### User mode
 
-`duke.kernel.user.UserMode.run(entry, stack)` runs ring 3 code on the calling thread and returns
-its exit status. `Magic.enterUser` leaves a frame record at a 16-byte-aligned kernel stack top, a
+`duke.kernel.user.UserMode.run(space, entry, stack)` runs ring 3 code on the calling thread and
+returns its exit status. `Magic.enterUser` leaves a frame record at a 16-byte-aligned kernel stack top, a
 saved rbp under a return address back into `run`, and points the TSS's rsp0 and the CPU block at
 it, then `iretq`s to ring 3. Interrupts and system calls from ring 3 land just below that record.
 `Magic.leaveUser` cuts back to it, which is how exit and user faults return from `run`. An
@@ -229,6 +230,13 @@ never reaches a prologue, so preemption and stop-the-world requests are taken on
 after a handler for an interrupt from ring 3, `Interrupts.dispatch` turns interrupts back on and
 calls `UserMode.interrupted`, whose prologue can yield. The thread may come back on another CPU,
 so every return to ring 3 re-points that CPU's rsp0 at the thread's kernel stack first.
+
+Each process has an `AddressSpace`: its own lower half, the kernel's higher half shared. `run`
+hands its table to the scheduler, which keeps it with the thread and loads CR3 whenever it
+switches between threads on different tables, so kernel code reading user memory in a system
+call sees the right process even after moving CPUs. The CR3 write flushes the old process's TLB
+entries, which is all the shootdown single-threaded processes need. `run` goes back to the
+kernel's table before returning, so the space can be freed, with every frame mapped into it.
 
 ### Monitors
 
