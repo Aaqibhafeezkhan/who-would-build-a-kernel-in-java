@@ -26,4 +26,34 @@ final class Strings {
         }
         return h;
     }
+
+    static String isBlank() {
+        return "".isBlank() + " " + " \t\n".isBlank() + " " + "\t  \t".isBlank() + " " + " a ".isBlank()
+                + " " + " ".isBlank();
+    }
+
+    static String equalsIgnoreCase() {
+        return "Duke".equalsIgnoreCase("dUKE") + " " + "Duke".equalsIgnoreCase("Dukes") + " "
+                + "abc".equalsIgnoreCase("abd") + " " + "".equalsIgnoreCase("") + " "
+                + "é".equalsIgnoreCase("É") + " " + "Duke".equalsIgnoreCase(null);
+    }
+
+    static String join(String[] parts) {
+        String out = parts.length + ":";
+        for (String part : parts) {
+            out += "[" + part + "]";
+        }
+        return out;
+    }
+
+    static String split() {
+        return join("a,,b,,".split(",")) + " " + join(",a".split(",")) + " " + join("a b  c".split(" ")) + " "
+                + join("a::b::c".split("::")) + " " + join("abc".split(",")) + " " + join("".split(",")) + " "
+                + join(",".split(","));
+    }
+
+    static String splitLimit() {
+        return join("a,b,c".split(",", 2)) + " " + join("a,b,c".split(",", 1)) + " " + join("a,b,c".split(",", 10))
+                + " " + join("a,,".split(",", -1)) + " " + join("a,,".split(",", 0)) + " " + join("a,,".split(",", 3));
+    }
 }

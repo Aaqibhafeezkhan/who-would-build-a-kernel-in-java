@@ -170,6 +170,95 @@ public final class String implements Comparable<String> {
         return new String(joined);
     }
 
+
+    public boolean isBlank() {
+        for (int i = 0; i < value.length; i++) {
+            if (!Character.isWhitespace((char) (value[i] & 0xFF))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Same upper-then-lower comparison as the JDK, so Latin-1 edge cases agree with HotSpot. */
+    public boolean equalsIgnoreCase(String other) {
+        if (other == null || other.value.length != value.length) {
+            return false;
+        }
+        for (int i = 0; i < value.length; i++) {
+            char a = (char) (value[i] & 0xFF);
+            char b = (char) (other.value[i] & 0xFF);
+            if (a == b) {
+                continue;
+            }
+            char upperA = Character.toUpperCase(a);
+            char upperB = Character.toUpperCase(b);
+            if (upperA != upperB && Character.toLowerCase(upperA) != Character.toLowerCase(upperB)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public String[] split(String separator) {
+        return split(separator, 0);
+    }
+
+    /**
+     * The JDK takes a regex; there is no regex engine here, so only literal separators work and
+     * anything else throws rather than splitting wrong.
+     */
+    public String[] split(String separator, int limit) {
+        if (separator.isEmpty()) {
+            throw new UnsupportedOperationException("Empty separator");
+        }
+        for (int i = 0; i < separator.length(); i++) {
+            if (".$|()[{^?*+\\".indexOf(separator.charAt(i)) >= 0) {
+                throw new UnsupportedOperationException("Regex separator: " + separator);
+            }
+        }
+        int pieces = 1;
+        for (int from = 0; limit <= 0 || pieces < limit; ) {
+            int at = indexOf(separator, from);
+            if (at < 0) {
+                break;
+            }
+            pieces++;
+            from = at + separator.value.length;
+        }
+        String[] parts = new String[pieces];
+        int start = 0;
+        for (int p = 0; p < pieces - 1; p++) {
+            int at = indexOf(separator, start);
+            parts[p] = substring(start, at);
+            start = at + separator.value.length;
+        }
+        parts[pieces - 1] = substring(start);
+        if (limit == 0 && pieces > 1) {
+            int size = pieces;
+            while (size > 0 && parts[size - 1].isEmpty()) {
+                size--;
+            }
+            if (size < pieces) {
+                String[] trimmed = new String[size];
+                for (int i = 0; i < size; i++) {
+                    trimmed[i] = parts[i];
+                }
+                return trimmed;
+            }
+        }
+        return parts;
+    }
+
+    private int indexOf(String other, int fromIndex) {
+        for (int i = fromIndex; i + other.value.length <= value.length; i++) {
+            if (regionMatches(i, other)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     public static String valueOf(Object object) {
         return object == null ? "null" : object.toString();
     }
