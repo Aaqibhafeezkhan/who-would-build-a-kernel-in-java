@@ -10,18 +10,29 @@ machine code and a bootable ELF. Limine boots it. No C, no assembler, no linker.
 kernel/src/**/*.java ──javac --system none──▶ .class ──dukec──▶ kernel.elf ──Limine (UEFI)──▶ QEMU / hardware
 ```
 
-Right now it boots, handles interrupts and exceptions in Java, and agrees with HotSpot on every
-test in the conformance suite: objects, virtual and interface dispatch, lambdas, boxing, string
-concatenation, try/catch/finally, stack overflow. It runs on its own page tables with a garbage
-collector, drives the timer, keyboard and framebuffer, and preempts kernel threads. Monitors and a
-second CPU are next on the [roadmap](https://github.com/JackFurton/who-would-build-a-kernel-in-java/milestones).
+Right now it boots on every CPU, handles interrupts and exceptions in Java, and agrees with HotSpot
+on every test in the conformance suite: objects, virtual and interface dispatch, lambdas, boxing,
+string concatenation, try/catch/finally, stack overflow. Java threads run preemptively on all CPUs
+at once, with monitors and a garbage collector. It drives the timer, keyboard, serial port,
+framebuffer, PCI and virtio disks, reads FAT32 and FAT16, and has a shell.
+
+User programs run in ring 3, each in its own address space. Static x86-64 Linux executables load
+from disk and make Linux system calls, so the programs `jsc` compiles from JavaScript print the same
+output on Duke as on Linux and under node. Processes (`fork`, `execve`, file descriptors) are next
+on the [roadmap](https://github.com/JackFurton/who-would-build-a-kernel-in-java/milestones).
 
 ```
 Duke: hello from Java on bare metal
 bytecode arithmetic check: 6 * 7 = 42
 interrupts: IDT loaded, 2 breakpoints handled and resumed
 exceptions: caught java.lang.NumberFormatException: For input string: "forty-two"
-DUKE-BOOT-OK
+...
+duke> cat hello.txt
+hello from FAT32
+duke> run /bin/hello
+hello from ring 3, I am /bin/hello
+duke> run bin/crash
+bin/crash: #GP general protection at 0x4000e8 (error 0x0)
 ```
 
 ## Progress
@@ -59,7 +70,7 @@ covers both. Put the firmware somewhere unusual? Set `OVMF=/path/to/OVMF_CODE.fd
 
 ```sh
 make run          # build and boot to a shell on your terminal (try help); Ctrl-A X quits
-make test         # compiler unit tests, boot test, conformance, panic and kernel suites
+make test         # unit tests, jsc vs node, boot, conformance, panic, kernel and shell suites
 make disasm       # objdump the kernel (symbols included)
 ```
 
@@ -76,6 +87,7 @@ The first build downloads a pinned Limine release into `build/limine`.
 | `tests/conformance/` | Differential tests, run on HotSpot and in the kernel |
 | `tests/panics/` | Kernels that must die with a specific panic and backtrace |
 | `tests/kernel/` | Tests that run inside the booted kernel (`make ktest`) |
+| `tests/js/` | JavaScript programs `jsc` must run like node does: on Linux, the JVM and Duke (`make js-test`) |
 | `tools/` | ESP layout, QEMU launch, test harnesses, metrics and the progress chart |
 | `boot/` | Limine config |
 
