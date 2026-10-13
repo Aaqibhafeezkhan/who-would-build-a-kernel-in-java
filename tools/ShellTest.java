@@ -76,6 +76,22 @@ public class ShellTest {
             }
             failures += check("serial", () -> type(serial, "echo hello over serial\n"), "hello over serial");
             failures += check("serial editing", () -> type(serial, "ecxx\u007f\u007fho fixed\n"), "fixed");
+            failures += check("serial left arrow insert", () -> type(serial, "echo due\u001b[Dk\n"), "\nduke\n");
+            failures += check("serial right arrow", () -> type(serial,
+                    "echo duk\u001b[D\u001b[Ce\n"), "\nduke\n");
+            failures += check("serial home", () -> type(serial,
+                    "duke\u001b[Hecho \n"), "\nduke\n");
+            failures += check("serial end", () -> type(serial,
+                    "echo duk\u001b[D\u001b[D\u001b[Fe\n"), "\nduke\n");
+            failures += check("serial delete", () -> type(serial,
+                    "echo dukxe\u001b[D\u001b[D\u001b[3~\n"), "\nduke\n");
+            failures += check("serial split escape sequence", () -> {
+                type(serial, "echo due\u001b");
+                Thread.sleep(50);
+                type(serial, "[");
+                Thread.sleep(50);
+                type(serial, "Dk\n");
+            }, "\nduke\n");
             failures += check("unknown command", () -> type(serial, "frobnicate\n"), "unknown command: frobnicate (try help)");
             failures += check("ps/2 keyboard", () -> keys(monitor, "u p t i m e ret"), "up ");
             failures += check("ps/2 shift", () -> keys(monitor, "e c h o spc shift-d u k e shift-1 ret"), "Duke!");
