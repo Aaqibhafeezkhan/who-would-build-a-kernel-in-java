@@ -19,6 +19,7 @@ public final class Frame {
     public static final int RSI = 9;
     public static final int RBP = 10;
     public static final int RDX = 12;
+    public static final int RCX = 13;
     public static final int RAX = 14;
 
     private static final int VECTOR = 120;

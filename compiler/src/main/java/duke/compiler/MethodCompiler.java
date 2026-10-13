@@ -1088,7 +1088,8 @@ final class MethodCompiler {
                 a.mov(RSP, RSI);
                 a.pop(RBP);
             }
-            case "enterUser" -> enterUser();
+            case "enterUser" -> enterUser(false);
+            case "enterUserWith" -> enterUser(true);
             case "leaveUser" -> {
                 // leaveUser(kernelStack, status): pops the frame record enterUser left at kernelStack
                 // and returns into it, where enterUser's result is the status.
@@ -1154,18 +1155,27 @@ final class MethodCompiler {
         }
     }
 
+    /** The order of the saved registers in an interrupt or syscall frame (duke.kernel.x86.Frame), lowest first. */
+    private static final Reg[] FRAME_REGISTERS = {
+        Reg.R15, Reg.R14, Reg.R13, Reg.R12, Reg.R11, Reg.R10, Reg.R9, Reg.R8,
+        Reg.RDI, RSI, RBP, Reg.RBX, RDX, RCX, RAX};
+
     /**
      * enterUser(rip, rsp). Leaves a frame record at a 16-byte-aligned kernel stack top, a saved rbp
      * under a return address into this method, the way a call would, and points the TSS and the
      * CPU block there: interrupts and system calls from ring 3 arrive just below it, and
      * leaveUser returns through it. Then swapgs and iretq to ring 3 with interrupts on and every
-     * register cleared. The return address is a safepoint, so a stack walk from a handler below carries on
-     * into this frame.
+     * register cleared, or for enterUserWith(rip, rsp, registers) loaded from 15 longs in a frame's
+     * order, as a forked child resumes. The return address is a safepoint, so a stack walk from a
+     * handler below carries on into this frame.
      */
-    private void enterUser() {
+    private void enterUser(boolean withRegisters) {
+        if (withRegisters) {
+            popLong(Reg.R8);
+        }
         popLong(RSI);
         popLong(Reg.RDI);
-        consumed = 4;
+        consumed = withRegisters ? 6 : 4;
         X64.Label resume = new X64.Label();
         a.mov(RDX, RSP);
         a.aluImm(Alu.AND, true, RSP, -16);
@@ -1181,9 +1191,19 @@ final class MethodCompiler {
         a.pushImm(Compiler.USER_CODE);
         a.push(Reg.RDI);
         a.swapgs();
-        for (Reg r : Reg.values()) {
-            if (r != RSP) {
-                a.alu(Alu.XOR, false, r, r);
+        if (withRegisters) {
+            a.mov(RAX, Reg.R8);
+            for (int i = 0; i < FRAME_REGISTERS.length; i++) {
+                if (FRAME_REGISTERS[i] != RAX) {
+                    a.load(8, false, FRAME_REGISTERS[i], Mem.at(RAX, 8 * i));
+                }
+            }
+            a.load(8, false, RAX, Mem.at(RAX, 8 * (FRAME_REGISTERS.length - 1)));
+        } else {
+            for (Reg r : Reg.values()) {
+                if (r != RSP) {
+                    a.alu(Alu.XOR, false, r, r);
+                }
             }
         }
         a.iretq();

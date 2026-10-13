@@ -42,6 +42,18 @@ public final class UserState {
         Magic.writeCr4(Magic.readCr4() | CR4_OSFXSR | CR4_OSXMMEXCPT);
     }
 
+    /** What the CPU holds for the calling thread's user code now, for a forked child to start from. */
+    public static UserState copyOfThisCpu() {
+        UserState s = new UserState();
+        long flags = Magic.flags();
+        Magic.disableInterrupts();
+        s.save();
+        if ((flags & 0x200) != 0) {
+            Magic.enableInterrupts();
+        }
+        return s;
+    }
+
     /** Copies the CPU's user state here. Interrupts must be off. */
     public void save() {
         fsBase = Magic.readMsr(IA32_FS_BASE);

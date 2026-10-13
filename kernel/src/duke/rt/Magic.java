@@ -131,6 +131,9 @@ public final class Magic {
     /** Abandons every frame below {@code kernelStack} and makes the {@link #enterUser} that set it return {@code status}. */
     public static native void leaveUser(long kernelStack, long status);
 
+    /** enterUser, with the other 15 registers loaded from {@code registers} in an interrupt frame's order. */
+    public static native long enterUserWith(long rip, long rsp, long registers);
+
     /** Points this CPU's TSS and block at {@code rsp}, where the next interrupt or system call from ring 3 lands. */
     public static native void setKernelStack(long rsp);
 

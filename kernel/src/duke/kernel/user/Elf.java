@@ -10,7 +10,7 @@ import duke.rt.Tib;
 
 /**
  * Loads static x86-64 ELF executables into a new {@link AddressSpace}, with the initial stack
- * Linux's ABI gives a process: argc at rsp, then argv, an empty environment and the auxiliary
+ * Linux's ABI gives a process: argc at rsp, then argv, the environment and the auxiliary
  * vector, so a static libc's startup code finds what it looks for.
  */
 public final class Elf {
@@ -66,6 +66,11 @@ public final class Elf {
      * saying why, for anything that isn't a static x86-64 executable that fits in the lower half.
      */
     public static Image load(byte[] file, String[] argv) {
+        return load(file, argv, new String[0]);
+    }
+
+    /** With {@code envp} as the environment, after argv on the stack. */
+    public static Image load(byte[] file, String[] argv, String[] envp) {
         long phoff = check(file);
         int phnum = u16(file, 56);
         AddressSpace space = new AddressSpace();
@@ -84,7 +89,7 @@ public final class Elf {
                 }
             }
             long entry = u64(file, 24);
-            long stack = buildStack(space, argv, entry, phdr, phnum);
+            long stack = buildStack(space, argv, envp, entry, phdr, phnum);
             // A page's gap on either side, so running off the end of one doesn't land in another.
             space.setMapRange(((imageEnd + PAGE - 1) & -PAGE) + PAGE, STACK_TOP - STACK_BYTES - PAGE);
             return new Image(space, entry, stack);
@@ -174,11 +179,12 @@ public final class Elf {
     }
 
     /**
-     * Maps the stack and lays out, from rsp up: argc, argv and its null, the environment's null,
+     * Maps the stack and lays out, from rsp up: argc, argv and its null, envp and its null,
      * the auxiliary vector, then the strings and AT_RANDOM's bytes. All of that goes in the top
      * page, which caps argv at what fits there.
      */
-    private static long buildStack(AddressSpace space, String[] argv, long entry, long phdr, int phnum) {
+    private static long buildStack(AddressSpace space, String[] argv, String[] envp, long entry, long phdr,
+            int phnum) {
         long nx = KernelAddressSpace.noExecuteSupported() ? PageTable.NO_EXECUTE : 0;
         space.reserve(STACK_TOP - STACK_BYTES, STACK_BYTES, PageTable.WRITABLE | nx);
         long topFrame = space.allocate(STACK_TOP - PAGE, PageTable.WRITABLE | nx);
@@ -188,9 +194,9 @@ public final class Elf {
         for (int i = 0; i < 16; i += 8) {
             Magic.pokeLong(view + random + i, nextRandom());
         }
-        long[] pointers = new long[argv.length];
-        for (int i = 0; i < argv.length; i++) {
-            String arg = argv[i];
+        long[] pointers = new long[argv.length + envp.length];
+        for (int i = 0; i < pointers.length; i++) {
+            String arg = i < argv.length ? argv[i] : envp[i - argv.length];
             cursor -= arg.length() + 1;
             if (cursor < STACK_TOP - PAGE) {
                 throw new IllegalArgumentException("arguments too long");
@@ -204,7 +210,7 @@ public final class Elf {
         long[] auxv = {
             AT_PHDR, phdr, AT_PHENT, PHENT, AT_PHNUM, phnum, AT_PAGESZ, PAGE, AT_ENTRY, entry,
             AT_RANDOM, random, AT_NULL, 0};
-        int words = 1 + argv.length + 1 + 1 + auxv.length;
+        int words = 1 + argv.length + 1 + envp.length + 1 + auxv.length;
         long rsp = (cursor - 8L * words) & -16;
         if (rsp < STACK_TOP - PAGE) {
             throw new IllegalArgumentException("arguments too long");
@@ -212,13 +218,20 @@ public final class Elf {
         long at = rsp;
         Magic.pokeLong(view + at, argv.length);
         at += 8;
-        for (long p : pointers) {
-            Magic.pokeLong(view + at, p);
+        for (int i = 0; i < pointers.length; i++) {
+            if (i == argv.length) {
+                Magic.pokeLong(view + at, 0);
+                at += 8;
+            }
+            Magic.pokeLong(view + at, pointers[i]);
+            at += 8;
+        }
+        if (envp.length == 0) {
+            Magic.pokeLong(view + at, 0);
             at += 8;
         }
         Magic.pokeLong(view + at, 0);
-        Magic.pokeLong(view + at + 8, 0);
-        at += 16;
+        at += 8;
         for (long v : auxv) {
             Magic.pokeLong(view + at, v);
             at += 8;

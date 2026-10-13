@@ -105,6 +105,27 @@ public final class AddressSpace {
         return start;
     }
 
+    /**
+     * A copy for fork: every mapped page copied, every reservation and the mmap range kept, so
+     * the child pages in what the parent never touched. Frees what it took if memory runs out.
+     */
+    public AddressSpace copy() {
+        AddressSpace child = new AddressSpace();
+        try {
+            table.copyLowerHalfInto(child.table);
+        } catch (OutOfMemoryError e) {
+            child.free();
+            throw e;
+        }
+        child.starts = Arrays.copyOf(starts, starts.length);
+        child.ends = Arrays.copyOf(ends, ends.length);
+        child.flags = Arrays.copyOf(flags, flags.length);
+        child.reserved = reserved;
+        child.mapFloor = mapFloor;
+        child.mapTop = mapTop;
+        return child;
+    }
+
     /** Frees every page and table. No thread may still be running in it. */
     public void free() {
         table.freeLowerHalf();

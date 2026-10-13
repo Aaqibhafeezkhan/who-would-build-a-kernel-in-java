@@ -1,6 +1,7 @@
 package duke.kernel.user;
 
 import duke.kernel.mm.AddressSpace;
+import duke.kernel.x86.UserState;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -46,9 +47,15 @@ public final class Process {
     private Process parent;
     /** Collected by the kernel's waitFor rather than a parent's wait4. */
     private final boolean startedByKernel;
-    private final AddressSpace space;
-    private final long entry;
-    private final long stack;
+    // The image the thread runs next: replaced by execve, and freed when it's left behind.
+    private AddressSpace space;
+    private long entry;
+    private long stack;
+    /** A forked child's first registers and FS, GS and FPU state; null to start from zeroes. */
+    private long[] registers;
+    private UserState userState;
+    /** What execve loaded, for the thread to switch to once it's out of ring 3. */
+    private Elf.Image pendingImage;
     private final Runner thread;
     private boolean ended;
     private long exitStatus;
@@ -96,15 +103,43 @@ public final class Process {
         }
     }
 
+    /**
+     * A copy of the calling process for fork, carrying on from its system call with the same
+     * registers (rax aside, 0 in the child), FS, GS and FPU state, memory and open files.
+     */
+    static Process fork(Process parent, AddressSpace space, long rip, long rsp, long[] registers, UserState state) {
+        Process child = new Process(parent.name, parent, space, rip, rsp);
+        child.registers = registers;
+        child.userState = state;
+        child.files.copyFrom(parent.files);
+        child.thread.start();
+        return child;
+    }
+
+    /** For execve: run {@code image} instead once this process's thread leaves ring 3. */
+    void replaceImage(Elf.Image image) {
+        pendingImage = image;
+    }
+
     private void runInThread() {
         long status = 0;
         UserMode.Fault faulted = null;
-        try {
-            status = UserMode.run(space, entry, stack);
-        } catch (UserMode.Fault f) {
-            faulted = f;
-        } finally {
+        while (true) {
+            try {
+                status = UserMode.run(space, entry, stack, registers, userState);
+            } catch (UserMode.Fault f) {
+                faulted = f;
+            }
             space.free();
+            if (faulted != null || status != UserMode.EXECED) {
+                break;
+            }
+            space = pendingImage.space;
+            entry = pendingImage.entry;
+            stack = pendingImage.stack;
+            registers = null;
+            userState = null;
+            pendingImage = null;
         }
         synchronized (LOCK) {
             ended = true;

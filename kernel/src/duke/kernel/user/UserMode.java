@@ -8,6 +8,7 @@ import duke.kernel.x86.Gdt;
 import duke.kernel.x86.Interrupts;
 import duke.kernel.x86.UserState;
 import duke.rt.Magic;
+import duke.rt.Tib;
 
 /**
  * Ring 3. A thread runs user code with {@link #run}, which returns when the code exits and throws
@@ -50,6 +51,8 @@ public final class UserMode {
     /** Saved registers, vector, error code, then the CPU's rip, cs, rflags, rsp and ss (Frame). */
     private static final int INTERRUPT_FRAME_BYTES = 176;
     private static final long FAULTED = Long.MIN_VALUE;
+    /** What run returns after execve: an exit status is always an int, so this can't be one. */
+    public static final long EXECED = Long.MIN_VALUE + 1;
 
     // Per CPU: the fault handler records it on the CPU where run picks it up, without allocating.
     private static final long[] FAULT_VECTOR = new long[Smp.MAX_CPUS];
@@ -74,13 +77,25 @@ public final class UserMode {
      * until it calls exit, and returns the exit status. Both must be mapped there.
      */
     public static long run(AddressSpace space, long entry, long stack) {
-        UserState state = new UserState();
+        return run(space, entry, stack, null, null);
+    }
+
+    /**
+     * {@link #run}, starting from {@code registers} (15 longs in an interrupt frame's order) and
+     * {@code state} rather than zeroes when they aren't null: how a forked child carries on from
+     * its parent's system call.
+     */
+    public static long run(AddressSpace space, long entry, long stack, long[] registers, UserState state) {
+        if (state == null) {
+            state = new UserState();
+        }
         long flags = Magic.flags();
         Magic.disableInterrupts();
         Scheduler.setAddressSpace(space);
         Scheduler.setUserState(state);
         state.load();
-        long status = Magic.enterUser(entry, stack);
+        long status = registers == null ? Magic.enterUser(entry, stack)
+                : Magic.enterUserWith(entry, stack, Magic.addressOf(registers) + Tib.ARRAY_DATA);
         Scheduler.setUserState(null);
         // Back on the kernel's table, so space can be freed once this returns.
         Scheduler.setAddressSpace(null);

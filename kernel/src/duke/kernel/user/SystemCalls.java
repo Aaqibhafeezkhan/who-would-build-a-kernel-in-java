@@ -24,6 +24,8 @@ public final class SystemCalls {
     public static final int LSEEK = 8;
     public static final int MMAP = 9;
     public static final int GETPID = 39;
+    public static final int FORK = 57;
+    public static final int EXECVE = 59;
     public static final int WAIT4 = 61;
     public static final int GETPPID = 110;
     public static final int ARCH_PRCTL = 158;
@@ -36,9 +38,12 @@ public final class SystemCalls {
     public static final int EPERM = 1;
     public static final int ENOENT = 2;
     public static final int EIO = 5;
+    public static final int E2BIG = 7;
+    public static final int ENOEXEC = 8;
     public static final int EBADF = 9;
     public static final int ECHILD = 10;
     public static final int ENOMEM = 12;
+    public static final int EACCES = 13;
     public static final int EFAULT = 14;
     public static final int ENOTDIR = 20;
     public static final int EISDIR = 21;
@@ -65,6 +70,10 @@ public final class SystemCalls {
     /** sizeof(struct stat) on x86-64. */
     public static final int STAT_BYTES = 144;
     private static final int PATH_MAX = 4096;
+    /** More argv or envp entries than this get E2BIG; they'd never fit the stack's top page anyway. */
+    private static final int MAX_ARGS = 1024;
+    /** Where the syscall stub saved the user's rsp, after the registers. */
+    private static final int USER_RSP = 120;
     public static final int ARCH_SET_GS = 0x1001;
     public static final int ARCH_SET_FS = 0x1002;
     public static final int ARCH_GET_FS = 0x1003;
@@ -112,6 +121,16 @@ public final class SystemCalls {
         } else if (number == WAIT4) {
             result = wait4((int) a0, Frame.register(frame, Frame.RSI), Frame.register(frame, Frame.RDX),
                     Frame.register(frame, Frame.R10));
+        } else if (number == FORK) {
+            result = fork(frame);
+        } else if (number == EXECVE) {
+            result = execve(a0, a1, a2);
+            if (result == 0) {
+                // The new image is in place; leave the old one's system call the way exit does.
+                Magic.disableInterrupts();
+                Magic.leaveUser(frame + FRAME_BYTES, UserMode.EXECED);
+                return;
+            }
         } else if (number == EXIT || number == EXIT_GROUP) {
             Magic.disableInterrupts();
             Magic.leaveUser(frame + FRAME_BYTES, (int) a0);
@@ -181,6 +200,103 @@ public final class SystemCalls {
     private static FileTable files() {
         Process self = Process.current();
         return self != null ? self.files : FileTable.NO_PROCESS;
+    }
+
+    /**
+     * The child carries on from this system call, returning 0, with a copy of everything: memory,
+     * registers, FS, GS and FPU state, and the same open files.
+     */
+    private static long fork(long frame) {
+        Process self = Process.current();
+        if (self == null) {
+            return -ENOSYS;
+        }
+        long[] registers = new long[Frame.REGISTERS.length];
+        for (int i = 0; i < registers.length; i++) {
+            registers[i] = Frame.register(frame, i);
+        }
+        registers[Frame.RAX] = 0;
+        AddressSpace space;
+        try {
+            space = Scheduler.addressSpace().copy();
+        } catch (OutOfMemoryError e) {
+            return -ENOMEM;
+        }
+        // syscall left the return address in rcx.
+        long rip = Frame.register(frame, Frame.RCX);
+        long rsp = Magic.peekLong(frame + USER_RSP);
+        return Process.fork(self, space, rip, rsp, registers, UserState.copyOfThisCpu()).pid;
+    }
+
+    /**
+     * Loads the new image into a fresh address space first, so a failure returns an error to the
+     * old one. Returns 0 once the new one is ready for the caller to switch to.
+     */
+    private static long execve(long pathAddress, long argvAddress, long envpAddress) {
+        Process self = Process.current();
+        if (self == null) {
+            return -ENOSYS;
+        }
+        String path = userString(pathAddress);
+        String[] argv = userStrings(argvAddress);
+        String[] envp = userStrings(envpAddress);
+        if (path == null || argv == null || envp == null) {
+            return -EFAULT;
+        }
+        if (argv.length > MAX_ARGS || envp.length > MAX_ARGS) {
+            return -E2BIG;
+        }
+        Fat fs = Fat.mounted();
+        if (fs == null) {
+            return -ENOENT;
+        }
+        byte[] file;
+        try {
+            if (fs.lookup(path).directory) {
+                return -EACCES;
+            }
+            file = fs.read(path);
+        } catch (IllegalArgumentException e) {
+            return -ENOENT;
+        } catch (IllegalStateException e) {
+            return -EIO;
+        }
+        try {
+            self.replaceImage(Elf.load(file, argv, envp));
+        } catch (IllegalArgumentException e) {
+            return e.getMessage().equals("arguments too long") ? -E2BIG : -ENOEXEC;
+        } catch (OutOfMemoryError e) {
+            return -ENOMEM;
+        }
+        return 0;
+    }
+
+    /**
+     * The strings a NULL-terminated array of pointers points at, none for a null array, or null
+     * if any of it isn't readable. Stops counting past MAX_ARGS.
+     */
+    private static String[] userStrings(long array) {
+        if (array == 0) {
+            return new String[0];
+        }
+        int count = 0;
+        while (count <= MAX_ARGS) {
+            if (!userReadable(array + 8L * count, 8)) {
+                return null;
+            }
+            if (Magic.peekLong(array + 8L * count) == 0) {
+                break;
+            }
+            count++;
+        }
+        String[] strings = new String[count];
+        for (int i = 0; i < count; i++) {
+            strings[i] = userString(Magic.peekLong(array + 8L * i));
+            if (strings[i] == null) {
+                return null;
+            }
+        }
+        return strings;
     }
 
     private static long read(long fd, long buffer, long count) {

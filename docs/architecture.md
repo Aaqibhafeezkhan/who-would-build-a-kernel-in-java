@@ -263,9 +263,17 @@ memory, so `read`, `lseek` and `fstat` never touch the disk; anything that would
 echoed and editable, as from a terminal in canonical mode. The shell is waiting on the process
 meanwhile, so the two never read the keyboard at once.
 
+`fork` copies the caller eagerly (every mapped page, plus its reservations, so untouched memory
+stays lazy in the child too; no copy-on-write yet), shares its open files as Linux does, and
+starts the child's thread with `Magic.enterUserWith`, which loads all fifteen saved registers
+instead of zeroing them, with `rax` 0 and the parent's FS, GS and FPU state. `execve` loads the new
+image into a fresh address space first, so a bad path or file returns an error to the old one;
+then it leaves user mode the way `exit` does, with `UserMode.EXECED` as the status, and the
+process's thread frees the old image and runs the new one. The pid, parent and files carry over.
+
 System calls so far: `read` (0), `write` (1), `open` (2), `close` (3), `fstat` (5), `lseek` (8),
-`mmap` (9), `getpid` (39), `exit` (60), `wait4` (61), `getppid` (110), `arch_prctl` (158),
-`exit_group` (231) and `openat` (257), with Linux's numbers. `SystemCalls.dispatch` is entered from
+`mmap` (9), `getpid` (39), `fork` (57), `execve` (59), `exit` (60), `wait4` (61), `getppid` (110),
+`arch_prctl` (158), `exit_group` (231) and `openat` (257), with Linux's numbers. `SystemCalls.dispatch` is entered from
 the syscall stub without a class-initialization check, so `SystemCalls` keeps no statics that need
 one. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
 the host, put on a FAT disk, and run one after another through the shell in a single boot, with

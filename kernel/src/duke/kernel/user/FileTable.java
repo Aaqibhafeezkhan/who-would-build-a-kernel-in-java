@@ -20,6 +20,15 @@ final class FileTable {
         files[2] = OpenFile.CONSOLE;
     }
 
+    /** For fork: the same open files as {@code parent}, sharing their positions as Linux's do. */
+    void copyFrom(FileTable parent) {
+        synchronized (parent) {
+            synchronized (this) {
+                System.arraycopy(parent.files, 0, files, 0, MAX_FILES);
+            }
+        }
+    }
+
     /** The file {@code fd} refers to, or null if it's not open. */
     synchronized OpenFile get(long fd) {
         return fd >= 0 && fd < MAX_FILES ? files[(int) fd] : null;

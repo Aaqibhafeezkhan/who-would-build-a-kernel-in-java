@@ -45,7 +45,7 @@ final class OpenFile {
     }
 
     /** Copies up to {@code count} bytes into user memory at {@code buffer}, already checked writable. */
-    long read(long buffer, long count) {
+    synchronized long read(long buffer, long count) {
         if (directory) {
             return -SystemCalls.EISDIR;
         }
@@ -95,7 +95,7 @@ final class OpenFile {
         return count;
     }
 
-    long seek(long offset, int whence) {
+    synchronized long seek(long offset, int whence) {
         if (this == CONSOLE) {
             return -SystemCalls.ESPIPE;
         }

@@ -58,6 +58,35 @@ public final class PageTable {
         PhysicalMemory.free(root);
     }
 
+    /**
+     * Gives {@code into} a copy of every lower-half 4 KiB page: a new frame with the same contents
+     * and permissions at the same address. For fork, so eager: no copy-on-write yet.
+     */
+    public void copyLowerHalfInto(PageTable into) {
+        copyTables(root, 4, HIGHER_HALF, 0, into);
+    }
+
+    private static void copyTables(long table, int level, long entries, long base, PageTable into) {
+        for (int i = 0; i < entries; i++) {
+            long value = Magic.peekLong(PhysicalMemory.toVirtual(table) + 8 * i);
+            if ((value & PRESENT) == 0) {
+                continue;
+            }
+            long virtual = base + ((long) i << (12 + 9 * (level - 1)));
+            if (level > 1 && (value & HUGE) != 0) {
+                throw new IllegalStateException("huge page in a lower half being copied");
+            }
+            if (level > 1) {
+                copyTables(value & ADDRESS_MASK, level - 1, 512, virtual, into);
+                continue;
+            }
+            long frame = PhysicalMemory.allocate();
+            Magic.copyMemory(PhysicalMemory.toVirtual(frame), PhysicalMemory.toVirtual(value & ADDRESS_MASK),
+                    PhysicalMemory.PAGE_SIZE);
+            into.map(virtual, frame, value & (WRITABLE | USER | NO_EXECUTE));
+        }
+    }
+
     private static void freeTables(long table, int level, long entries) {
         for (int i = 0; i < entries; i++) {
             long value = Magic.peekLong(PhysicalMemory.toVirtual(table) + 8 * i);
