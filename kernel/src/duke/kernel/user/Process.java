@@ -53,6 +53,7 @@ public final class Process {
     private boolean ended;
     private long exitStatus;
     private UserMode.Fault fault;
+    final FileTable files = new FileTable();
 
     private Process(String name, Process parent, AddressSpace space, long entry, long stack) {
         this.name = name;

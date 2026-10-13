@@ -32,7 +32,8 @@ public final class Shell {
         }
     }
 
-    private static String readLine() {
+    /** A line typed at the console, edited and echoed as it's typed, without its newline. */
+    public static String readLine() {
         StringBuilder line = new StringBuilder();
         int pos = 0;
 
@@ -112,7 +113,7 @@ public final class Shell {
         }
         switch (words.get(0)) {
             case "help" -> {
-                Console.println("commands: help, uptime, mem, gc, cpus, threads, pci, ls [path], cat <path>, run <path>, echo <text>, clear, panic");
+                Console.println("commands: help, uptime, mem, gc, cpus, threads, pci, ls [path], cat <path>, run <path> [args], echo <text>, clear, panic");
                 if (!Commands.names().isEmpty()) {
                     StringBuilder more = new StringBuilder("also:");
                     for (int i = 0; i < Commands.names().size(); i++) {
@@ -151,9 +152,13 @@ public final class Shell {
             }
             case "run" -> {
                 if (words.size() < 2) {
-                    Console.println("usage: run <path>");
+                    Console.println("usage: run <path> [args]");
                 } else {
-                    run(words.get(1));
+                    String[] argv = new String[words.size() - 1];
+                    for (int i = 0; i < argv.length; i++) {
+                        argv[i] = words.get(i + 1);
+                    }
+                    run(argv);
                 }
             }
             case "echo" -> Console.println(line.substring(4).strip());
@@ -184,7 +189,8 @@ public final class Shell {
     }
 
     /** Runs a static executable from the disk as a process, and says how it ended unless it exited 0. */
-    private static void run(String path) {
+    private static void run(String[] argv) {
+        String path = argv[0];
         Fat fs = Fat.mounted();
         if (fs == null) {
             Console.println("run: no filesystem mounted");
@@ -192,7 +198,7 @@ public final class Shell {
         }
         Elf.Image image;
         try {
-            image = Elf.load(fs.read(path), new String[] {path});
+            image = Elf.load(fs.read(path), argv);
         } catch (IllegalArgumentException e) {
             Console.println("run: " + path + ": " + e.getMessage());
             return;

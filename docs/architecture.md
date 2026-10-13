@@ -218,8 +218,8 @@ exception in ring 3 (anything under vector 32 but NMI and machine checks) comes 
 
 `syscall` goes to a compiler-emitted stub (`IA32_LSTAR`) that switches to the recorded kernel
 stack, saves registers in the interrupt frame's layout and calls `SystemCalls.dispatch`, which
-uses Linux's numbers and registers (the list is below). `write` takes fd 1 or 2 and checks every
-page of the buffer is mapped for ring 3. Ring 3 can load its own GS (one `mov gs` used to
+uses Linux's numbers and registers (the list is below). `read` and `write` check every page of the
+buffer is mapped for ring 3 first. Ring 3 can load its own GS (one `mov gs` used to
 take the machine down), so both entry paths and `enterUser` `swapgs` at the boundary.
 
 Each thread in ring 3 has a `UserState`: its FS and GS bases (set with `arch_prctl`) and its x87
@@ -256,8 +256,18 @@ It frees its memory as soon as it ends but stays in the table as a zombie until 
 `wait4` or, for one the kernel started, `waitFor` collects its status. A process whose parent has
 ended is dropped as soon as it ends itself. The shell's `run` starts one and waits.
 
-System calls so far: `write` (1), `mmap` (9), `getpid` (39), `exit` (60), `wait4` (61), `getppid`
-(110), `arch_prctl` (158) and `exit_group` (231), with Linux's numbers. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
+Each process has a table of 64 file descriptors, with the console on 0, 1 and 2. `open` and
+`openat` (relative to the root, since there's no working directory yet) read a FAT file whole into
+memory, so `read`, `lseek` and `fstat` never touch the disk; anything that would write gets
+`EROFS`. Reading the console runs the shell's line editor, so a program gets a line at a time,
+echoed and editable, as from a terminal in canonical mode. The shell is waiting on the process
+meanwhile, so the two never read the keyboard at once.
+
+System calls so far: `read` (0), `write` (1), `open` (2), `close` (3), `fstat` (5), `lseek` (8),
+`mmap` (9), `getpid` (39), `exit` (60), `wait4` (61), `getppid` (110), `arch_prctl` (158),
+`exit_group` (231) and `openat` (257), with Linux's numbers. `SystemCalls.dispatch` is entered from
+the syscall stub without a class-initialization check, so `SystemCalls` keeps no statics that need
+one. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
 the host, put on a FAT disk, and run one after another through the shell in a single boot, with
 the output compared to node's.
 

@@ -34,6 +34,14 @@ final class ProcessTest {
         return code.b(0x80, 0x3C, 0x25).imm32(address).b(0).b(0xF3, 0x90).b(0x74, 0xF4);
     }
 
+    private static long peekLong(byte[] page, int offset) {
+        long v = 0;
+        for (int i = 7; i >= 0; i--) {
+            v = v << 8 | page[offset + i] & 0xFF;
+        }
+        return v;
+    }
+
     static void testKernelCollectsExitStatuses() throws InterruptedException {
         int before = Process.count();
         Process a = new Program().load(new Code().exit(3)).start(null);
@@ -90,14 +98,16 @@ final class ProcessTest {
         wait4(code, -1, parent.data, 0);
         storeRax(code, parent.data + 8);
         wait4(code, -1, 0, 0);
-        storeRax(code, parent.data + 24).exit(0);
-        parent.load(code);
-        Process p = parent.start(null);
-        Process c = new Program().load(child).start(p);
-        Magic.pokeByte(parent.kernelView(16), (byte) 1);
-        assertEquals(0, p.waitFor(), "the parent's exit");
-        assertEquals(-SystemCalls.ECHILD, Magic.peekLong(parent.kernelView(24)), "a second wait4: nothing left");
-        return new long[] {c.pid, Magic.peekLong(parent.kernelView(8)), Magic.peekInt(parent.kernelView(0))};
+        storeRax(code, parent.data + 24).park(parent.data);
+        Process[] c = new Process[1];
+        long[] status = new long[1];
+        byte[] page = parent.startAndCollect(code, null, status, p -> {
+            c[0] = new Program().load(child).start(p);
+            Magic.pokeByte(parent.kernelView(16), (byte) 1);
+        });
+        assertEquals(0, status[0], "the parent's exit");
+        assertEquals(-SystemCalls.ECHILD, peekLong(page, 24), "a second wait4: nothing left");
+        return new long[] {c[0].pid, peekLong(page, 8), (int) peekLong(page, 0)};
     }
 
     static void testParentCollectsItsChild() throws InterruptedException {

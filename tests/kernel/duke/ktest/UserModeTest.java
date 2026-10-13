@@ -14,6 +14,7 @@ import duke.kernel.user.UserMode;
 import duke.rt.Heap;
 import duke.rt.Magic;
 import duke.rt.Tib;
+import java.util.function.Consumer;
 
 final class UserModeTest {
 
@@ -21,6 +22,8 @@ final class UserModeTest {
     private static final int GP = 13;
     private static final int PF = 14;
 
+    /** Where {@link Code#park} flags that it's waiting, in the data page. */
+    static final int PARKED = 4000;
     private static final long MAP_FLOOR = 0x1000_0000L;
     private static final long MAP_TOP = 0x10_0000_0000L;
 
@@ -59,6 +62,33 @@ final class UserModeTest {
         /** As a process, which frees the space when it ends: don't {@link #free} it as well. */
         Process start(Process parent) {
             return Process.start("test", parent, space, base, data + PAGE);
+        }
+
+        /**
+         * Runs code that ends with {@link Code#park}, copies the data page once it gets there, lets
+         * it exit, and returns the copy: the process's memory is gone once it ends.
+         */
+        byte[] startAndCollect(Code code, Process parent, long[] status) throws InterruptedException {
+            return startAndCollect(code, parent, status, p -> { });
+        }
+
+        /** The same, calling {@code started} with the process as soon as it's started. */
+        byte[] startAndCollect(Code code, Process parent, long[] status, Consumer<Process> started)
+                throws InterruptedException {
+            load(code);
+            Process p = start(parent);
+            started.accept(p);
+            for (int tries = 0; Magic.peekByte(kernelView(PARKED)) == 0; tries++) {
+                if (p.ended() || tries >= 1000) {
+                    throw new AssertionError("never parked");
+                }
+                Thread.sleep(5);
+            }
+            byte[] copy = new byte[(int) PAGE];
+            Magic.copyMemory(Magic.addressOf(copy) + Tib.ARRAY_DATA, kernelView(0), PAGE);
+            Magic.pokeByte(kernelView(PARKED + 1), (byte) 1);
+            status[0] = p.waitFor();
+            return copy;
         }
 
         void free() {
@@ -115,6 +145,13 @@ final class UserModeTest {
                     .b(0x41, 0xBA).imm32(flags).b(0x49, 0xC7, 0xC0).imm32(fd).b(0x45, 0x31, 0xC9).syscall();
         }
 
+        /** Sets the data page's PARKED byte, waits for the one after it, then exits 0. */
+        Code park(long data) {
+            b(0xC6, 0x04, 0x25).imm32(data + PARKED).b(1);
+            int spin = position();
+            return b(0xF3, 0x90).b(0x80, 0x3C, 0x25).imm32(data + PARKED + 1).b(0).jcc(0x4, spin).exit(0);
+        }
+
         Code exit(int status) {
             return movEdi(status).movEax(SystemCalls.EXIT).syscall();
         }
@@ -136,6 +173,12 @@ final class UserModeTest {
         Code jcc(int cc, int target) {
             int rel = target - (size + 6);
             return b(0x0F, 0x80 | cc).imm32(rel);
+        }
+
+        /** syscall(number, a0, a1, a2), then mov [result], rax. */
+        Code call(int number, long a0, long a1, long a2, long result) {
+            return movEax(number).b(0x48, 0xBF).imm64(a0).movRsi(a1).b(0x48, 0xBA).imm64(a2).syscall()
+                    .b(0x48, 0x89, 0x04, 0x25).imm32(result);
         }
 
         Code archPrctl(int code, long address) {

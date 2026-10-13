@@ -1,7 +1,7 @@
 package duke.kernel.user;
 
-import duke.kernel.Console;
 import duke.kernel.Scheduler;
+import duke.kernel.fs.Fat;
 import duke.kernel.mm.AddressSpace;
 import duke.kernel.mm.KernelAddressSpace;
 import duke.kernel.mm.PageTable;
@@ -16,7 +16,12 @@ import duke.rt.Magic;
  */
 public final class SystemCalls {
 
+    public static final int READ = 0;
     public static final int WRITE = 1;
+    public static final int OPEN = 2;
+    public static final int CLOSE = 3;
+    public static final int FSTAT = 5;
+    public static final int LSEEK = 8;
     public static final int MMAP = 9;
     public static final int GETPID = 39;
     public static final int WAIT4 = 61;
@@ -24,15 +29,24 @@ public final class SystemCalls {
     public static final int ARCH_PRCTL = 158;
     public static final int EXIT = 60;
     public static final int EXIT_GROUP = 231;
+    public static final int OPENAT = 257;
 
     public static final int ESRCH = 3;
     public static final int EINTR = 4;
     public static final int EPERM = 1;
+    public static final int ENOENT = 2;
+    public static final int EIO = 5;
     public static final int EBADF = 9;
     public static final int ECHILD = 10;
     public static final int ENOMEM = 12;
     public static final int EFAULT = 14;
+    public static final int ENOTDIR = 20;
+    public static final int EISDIR = 21;
     public static final int EINVAL = 22;
+    public static final int EMFILE = 24;
+    public static final int ESPIPE = 29;
+    public static final int EROFS = 30;
+    public static final int ENAMETOOLONG = 36;
     public static final int ENOSYS = 38;
 
     public static final int PROT_READ = 1;
@@ -43,6 +57,14 @@ public final class SystemCalls {
     public static final int MAP_ANONYMOUS = 0x20;
     public static final int MAP_NORESERVE = 0x4000;
     public static final int WNOHANG = 1;
+    public static final int O_ACCMODE = 3;
+    public static final int O_CREAT = 0x40;
+    public static final int O_TRUNC = 0x200;
+    public static final int O_DIRECTORY = 0x10000;
+    public static final int AT_FDCWD = -100;
+    /** sizeof(struct stat) on x86-64. */
+    public static final int STAT_BYTES = 144;
+    private static final int PATH_MAX = 4096;
     public static final int ARCH_SET_GS = 0x1001;
     public static final int ARCH_SET_FS = 0x1002;
     public static final int ARCH_GET_FS = 0x1003;
@@ -62,8 +84,23 @@ public final class SystemCalls {
         long number = Frame.register(frame, Frame.RAX);
         long a0 = Frame.register(frame, Frame.RDI);
         long result;
-        if (number == WRITE) {
-            result = write(a0, Frame.register(frame, Frame.RSI), Frame.register(frame, Frame.RDX));
+        long a1 = Frame.register(frame, Frame.RSI);
+        long a2 = Frame.register(frame, Frame.RDX);
+        if (number == READ) {
+            result = read(a0, a1, a2);
+        } else if (number == WRITE) {
+            result = write(a0, a1, a2);
+        } else if (number == OPEN) {
+            result = open(AT_FDCWD, a0, a1);
+        } else if (number == OPENAT) {
+            result = open((int) a0, a1, a2);
+        } else if (number == CLOSE) {
+            result = files().close(a0) ? 0 : -EBADF;
+        } else if (number == FSTAT) {
+            result = fstat(a0, a1);
+        } else if (number == LSEEK) {
+            OpenFile file = files().get(a0);
+            result = file == null ? -EBADF : file.seek(a1, (int) a2);
         } else if (number == MMAP) {
             result = mmap(Frame.register(frame, Frame.RSI), Frame.register(frame, Frame.RDX),
                     Frame.register(frame, Frame.R10), Frame.register(frame, Frame.R8), Frame.register(frame, Frame.R9));
@@ -141,17 +178,104 @@ public final class SystemCalls {
         return reaped.pid;
     }
 
+    private static FileTable files() {
+        Process self = Process.current();
+        return self != null ? self.files : FileTable.NO_PROCESS;
+    }
+
+    private static long read(long fd, long buffer, long count) {
+        OpenFile file = files().get(fd);
+        if (file == null) {
+            return -EBADF;
+        }
+        if (!userWritable(buffer, count)) {
+            return -EFAULT;
+        }
+        return file.read(buffer, count);
+    }
+
     private static long write(long fd, long buffer, long count) {
-        if (fd != 1 && fd != 2) {
+        OpenFile file = files().get(fd);
+        if (file == null) {
             return -EBADF;
         }
         if (!userReadable(buffer, count)) {
             return -EFAULT;
         }
-        for (long i = 0; i < count; i++) {
-            Console.write(Magic.peekByte(buffer + i) & 0xFF);
+        return file.write(buffer, count);
+    }
+
+    /**
+     * Read-only, so any flag that would write is refused. With no working directory yet, a relative
+     * path is relative to the root.
+     */
+    private static long open(int directory, long pathAddress, long flags) {
+        if (directory != AT_FDCWD) {
+            return -EINVAL;
         }
-        return count;
+        if ((flags & (O_ACCMODE | O_CREAT | O_TRUNC)) != 0) {
+            return -EROFS;
+        }
+        String path = userString(pathAddress);
+        if (path == null) {
+            return -EFAULT;
+        }
+        if (path.length() >= PATH_MAX) {
+            return -ENAMETOOLONG;
+        }
+        Fat fs = Fat.mounted();
+        if (fs == null) {
+            return -ENOENT;
+        }
+        OpenFile file;
+        try {
+            Fat.Entry entry = fs.lookup(path);
+            if (entry.directory) {
+                file = OpenFile.directory();
+            } else if ((flags & O_DIRECTORY) != 0) {
+                return -ENOTDIR;
+            } else {
+                file = OpenFile.file(fs.read(path));
+            }
+        } catch (IllegalArgumentException e) {
+            return -ENOENT;
+        } catch (IllegalStateException e) {
+            return -EIO;
+        }
+        return files().add(file);
+    }
+
+    private static long fstat(long fd, long buffer) {
+        OpenFile file = files().get(fd);
+        if (file == null) {
+            return -EBADF;
+        }
+        if (!userWritable(buffer, STAT_BYTES)) {
+            return -EFAULT;
+        }
+        Magic.zeroMemoryWords(buffer, STAT_BYTES / 8);
+        Magic.pokeLong(buffer + 16, 1);                          // st_nlink
+        Magic.pokeInt(buffer + 24, file.mode());                // st_mode
+        Magic.pokeLong(buffer + 48, file.size());               // st_size
+        Magic.pokeLong(buffer + 56, 512);                       // st_blksize
+        Magic.pokeLong(buffer + 64, (file.size() + 511) / 512); // st_blocks
+        return 0;
+    }
+
+    /** The NUL-terminated string at {@code address}, at most PATH_MAX bytes, or null if it isn't all readable. */
+    private static String userString(long address) {
+        StringBuilder sb = new StringBuilder();
+        for (long at = address; sb.length() < PATH_MAX; at++) {
+            if ((at == address || (at & (PhysicalMemory.PAGE_SIZE - 1)) == 0) && !userReadable(at, 1)) {
+                return null;
+            }
+            int c = Magic.peekByte(at) & 0xFF;
+            if (c == 0) {
+                return sb.toString();
+            }
+            sb.append((char) c);
+        }
+        return sb.toString();
     }
 
     /**

@@ -59,6 +59,8 @@ public class FatImage {
         files.put("big.bin", big);
         files.put("bin/hello", helloElf());
         files.put("bin/crash", crashElf());
+        files.put("bin/cat", catElf());
+        files.put("bin/echoline", echoLineElf());
         return files;
     }
 
@@ -99,6 +101,63 @@ public class FatImage {
         programHeader(elf, 1, 1, 6, 0x1000, data, message.length, 0x2000);
         programHeader(elf, 2, 0x6474E551, 6, 0, 0, 0, 0);
         elf.put(0x1000, message);
+        return elf.array();
+    }
+
+    static final long DATA = ELF_BASE + 0x1000;
+
+    /** cat argv[1]: open it, then read 512 bytes at a time and write them to fd 1. Exits 1 if open fails. */
+    static byte[] catElf() {
+        long buffer = DATA;
+        ByteBuffer c = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
+        c.put(new byte[] {0x48, (byte) 0x8B, 0x7C, 0x24, 0x10});           // mov rdi, argv[1]
+        c.put(new byte[] {0x31, (byte) 0xF6}).put((byte) 0xB8).putInt(2);   // xor esi, esi; mov eax, open
+        c.put(new byte[] {0x0F, 0x05, 0x48, (byte) 0x85, (byte) 0xC0});     // syscall; test rax, rax
+        int failJump = c.position();
+        c.put(new byte[] {0x78, 0});                                        // js fail
+        c.put(new byte[] {0x49, (byte) 0x89, (byte) 0xC4});                 // mov r12, rax
+        int loop = c.position();
+        c.put(new byte[] {0x4C, (byte) 0x89, (byte) 0xE7});                 // mov rdi, r12
+        c.put((byte) 0xBE).putInt((int) buffer).put((byte) 0xBA).putInt(512);
+        c.put(new byte[] {0x31, (byte) 0xC0, 0x0F, 0x05});                  // read
+        c.put(new byte[] {0x48, (byte) 0x85, (byte) 0xC0});                 // test rax, rax
+        int doneJump = c.position();
+        c.put(new byte[] {0x7E, 0});                                        // jle done
+        c.put(new byte[] {0x48, (byte) 0x89, (byte) 0xC2});                 // mov rdx, rax
+        c.put((byte) 0xBF).putInt(1).put((byte) 0xBE).putInt((int) buffer);
+        c.put((byte) 0xB8).putInt(1).put(new byte[] {0x0F, 0x05});          // write
+        c.put((byte) 0xEB).put((byte) (loop - (c.position() + 1)));         // jmp loop
+        c.put(doneJump + 1, (byte) (c.position() - (doneJump + 2)));
+        c.put(new byte[] {0x31, (byte) 0xFF}).put((byte) 0xB8).putInt(60).put(new byte[] {0x0F, 0x05});  // exit(0)
+        c.put(failJump + 1, (byte) (c.position() - (failJump + 2)));
+        c.put((byte) 0xBF).putInt(1).put((byte) 0xB8).putInt(60).put(new byte[] {0x0F, 0x05});           // exit(1)
+        return twoSegments(c, new byte[0], 512);
+    }
+
+    /** Reads a line from fd 0 and writes it back after "you said: ". */
+    static byte[] echoLineElf() {
+        byte[] prefix = "you said: ".getBytes(StandardCharsets.US_ASCII);
+        long buffer = DATA + 64;
+        ByteBuffer c = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
+        c.put(new byte[] {0x31, (byte) 0xC0, 0x31, (byte) 0xFF});           // read(0,
+        c.put((byte) 0xBE).putInt((int) buffer).put((byte) 0xBA).putInt(256).put(new byte[] {0x0F, 0x05});
+        c.put(new byte[] {0x49, (byte) 0x89, (byte) 0xC4});                 // mov r12, rax
+        c.put((byte) 0xB8).putInt(1).put((byte) 0xBF).putInt(1);            // write(1, prefix)
+        c.put((byte) 0xBE).putInt((int) DATA).put((byte) 0xBA).putInt(prefix.length).put(new byte[] {0x0F, 0x05});
+        c.put((byte) 0xB8).putInt(1).put((byte) 0xBF).putInt(1);            // write(1, buffer, r12)
+        c.put((byte) 0xBE).putInt((int) buffer).put(new byte[] {0x4C, (byte) 0x89, (byte) 0xE2, 0x0F, 0x05});
+        c.put(new byte[] {0x31, (byte) 0xFF}).put((byte) 0xB8).putInt(60).put(new byte[] {0x0F, 0x05});  // exit(0)
+        return twoSegments(c, prefix, 256 + 64);
+    }
+
+    /** Code at the entry point, read-only; {@code data} at DATA, writable, with {@code bss} zero bytes after it. */
+    private static byte[] twoSegments(ByteBuffer code, byte[] data, int bss) {
+        int codeBytes = code.position();
+        ByteBuffer elf = elfHeader(0x1000 + data.length, 2);
+        elf.put(Arrays.copyOf(code.array(), codeBytes));
+        programHeader(elf, 0, 1, 5, 0, ELF_BASE, ELF_HEADERS + codeBytes, ELF_HEADERS + codeBytes);
+        programHeader(elf, 1, 1, 6, 0x1000, DATA, data.length, data.length + bss);
+        elf.put(0x1000, data);
         return elf.array();
     }
 
