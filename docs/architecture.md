@@ -220,9 +220,14 @@ exception in ring 3 (anything under vector 32 but NMI and machine checks) comes 
 stack, saves registers in the interrupt frame's layout and calls `SystemCalls.dispatch`, which
 uses Linux's numbers and registers (the list is below). `write` takes fd 1 or 2 and checks every
 page of the buffer is mapped for ring 3. Ring 3 can load its own GS (one `mov gs` used to
-take the machine down), so both entry paths and `enterUser` `swapgs` at the boundary. Each `run`
-starts ring 3 with a GS base of 0, but nothing saves it per thread yet, so a thread that moves
-CPUs picks up whatever that CPU's last user left there.
+take the machine down), so both entry paths and `enterUser` `swapgs` at the boundary.
+
+Each thread in ring 3 has a `UserState`: its FS and GS bases (set with `arch_prctl`) and its x87
+and SSE registers, none of which kernel code touches. They stay in the CPU while the thread runs,
+the user's GS base in `IA32_KERNEL_GS_BASE`, and `switchTo` saves them (`fxsave`, `rdmsr`) when it
+switches a user thread out and loads them when it switches one in. Every `run` starts from zero bases and the reset FPU state. Limine leaves `CR4.OSFXSR`
+clear, which makes every SSE instruction raise #UD, so each CPU sets it (and `OSXMMEXCPT`) along
+with the syscall MSRs. AVX stays off: `XCR0` is never set, so a libc checking CPUID won't use it.
 
 The return address in that record is a safepoint. Both entry stubs point rbp at the record, so the
 collector and the unwinder walk from a handler straight into `run`'s frame and on up. User code
@@ -252,7 +257,7 @@ It frees its memory as soon as it ends but stays in the table as a zombie until 
 ended is dropped as soon as it ends itself. The shell's `run` starts one and waits.
 
 System calls so far: `write` (1), `mmap` (9), `getpid` (39), `exit` (60), `wait4` (61), `getppid`
-(110) and `exit_group` (231), with Linux's numbers. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
+(110), `arch_prctl` (158) and `exit_group` (231), with Linux's numbers. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
 the host, put on a FAT disk, and run one after another through the shell in a single boot, with
 the output compared to node's.
 

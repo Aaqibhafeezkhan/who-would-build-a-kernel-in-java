@@ -7,6 +7,7 @@ import duke.kernel.mm.KernelAddressSpace;
 import duke.kernel.mm.PageTable;
 import duke.kernel.mm.PhysicalMemory;
 import duke.kernel.x86.Frame;
+import duke.kernel.x86.UserState;
 import duke.rt.Magic;
 
 /**
@@ -20,11 +21,13 @@ public final class SystemCalls {
     public static final int GETPID = 39;
     public static final int WAIT4 = 61;
     public static final int GETPPID = 110;
+    public static final int ARCH_PRCTL = 158;
     public static final int EXIT = 60;
     public static final int EXIT_GROUP = 231;
 
     public static final int ESRCH = 3;
     public static final int EINTR = 4;
+    public static final int EPERM = 1;
     public static final int EBADF = 9;
     public static final int ECHILD = 10;
     public static final int ENOMEM = 12;
@@ -40,6 +43,10 @@ public final class SystemCalls {
     public static final int MAP_ANONYMOUS = 0x20;
     public static final int MAP_NORESERVE = 0x4000;
     public static final int WNOHANG = 1;
+    public static final int ARCH_SET_GS = 0x1001;
+    public static final int ARCH_SET_FS = 0x1002;
+    public static final int ARCH_GET_FS = 0x1003;
+    public static final int ARCH_GET_GS = 0x1004;
     /** sizeof(struct rusage), which wait4 zeroes: nothing's accounted yet. */
     private static final int RUSAGE_BYTES = 144;
 
@@ -63,6 +70,8 @@ public final class SystemCalls {
         } else if (number == GETPID || number == GETPPID) {
             Process self = Process.current();
             result = self == null ? -ESRCH : number == GETPID ? self.pid : self.parentPid();
+        } else if (number == ARCH_PRCTL) {
+            result = archPrctl(a0, Frame.register(frame, Frame.RSI));
         } else if (number == WAIT4) {
             result = wait4((int) a0, Frame.register(frame, Frame.RSI), Frame.register(frame, Frame.RDX),
                     Frame.register(frame, Frame.R10));
@@ -76,6 +85,28 @@ public final class SystemCalls {
         Frame.setRegister(frame, Frame.RAX, result);
         Magic.disableInterrupts();
         Magic.setKernelStack(frame + FRAME_BYTES);
+    }
+
+    /**
+     * The bases are in the CPU's MSRs while this thread runs, and the scheduler saves them from
+     * there when it switches away, so reading and writing the MSRs is reading and writing the thread's.
+     */
+    private static long archPrctl(long code, long address) {
+        if (code == ARCH_SET_FS || code == ARCH_SET_GS) {
+            if (address < 0 || address >= AddressSpace.END) {
+                return -EPERM;
+            }
+            Magic.writeMsr(code == ARCH_SET_FS ? UserState.IA32_FS_BASE : UserState.IA32_KERNEL_GS_BASE, address);
+            return 0;
+        }
+        if (code == ARCH_GET_FS || code == ARCH_GET_GS) {
+            if (!userWritable(address, 8)) {
+                return -EFAULT;
+            }
+            Magic.pokeLong(address, Magic.readMsr(code == ARCH_GET_FS ? UserState.IA32_FS_BASE : UserState.IA32_KERNEL_GS_BASE));
+            return 0;
+        }
+        return -EINVAL;
     }
 
     /** Children only, by pid or -1 for any: there are no process groups to wait on. */

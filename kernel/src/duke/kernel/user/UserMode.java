@@ -6,6 +6,7 @@ import duke.kernel.mm.AddressSpace;
 import duke.kernel.x86.Frame;
 import duke.kernel.x86.Gdt;
 import duke.kernel.x86.Interrupts;
+import duke.kernel.x86.UserState;
 import duke.rt.Magic;
 
 /**
@@ -41,8 +42,6 @@ public final class UserMode {
     private static final int IA32_STAR = 0xC0000081;
     private static final int IA32_LSTAR = 0xC0000082;
     private static final int IA32_FMASK = 0xC0000084;
-    /** Ring 3's GS base while the kernel's is in IA32_GS_BASE, and the other way round: swapgs trades them. */
-    private static final int IA32_KERNEL_GS_BASE = 0xC0000102;
     private static final long EFER_SYSCALL = 1;
     // TF, IF, DF, IOPL, NT and AC, as Linux clears them.
     private static final long SYSCALL_CLEARS = 0x47700;
@@ -61,8 +60,9 @@ public final class UserMode {
     private UserMode() {
     }
 
-    /** The syscall instruction's MSRs, which each CPU has its own copy of. */
+    /** The syscall instruction's MSRs and SSE, which each CPU has its own copy of. */
     public static void initOnThisCpu() {
+        UserState.initOnThisCpu();
         Magic.writeMsr(IA32_EFER, Magic.readMsr(IA32_EFER) | EFER_SYSCALL);
         Magic.writeMsr(IA32_STAR, (long) Gdt.USER_BASE << 48 | (long) Gdt.KERNEL_CODE << 32);
         Magic.writeMsr(IA32_LSTAR, Magic.syscallEntry());
@@ -74,11 +74,14 @@ public final class UserMode {
      * until it calls exit, and returns the exit status. Both must be mapped there.
      */
     public static long run(AddressSpace space, long entry, long stack) {
+        UserState state = new UserState();
         long flags = Magic.flags();
         Magic.disableInterrupts();
         Scheduler.setAddressSpace(space);
-        Magic.writeMsr(IA32_KERNEL_GS_BASE, 0);
+        Scheduler.setUserState(state);
+        state.load();
         long status = Magic.enterUser(entry, stack);
+        Scheduler.setUserState(null);
         // Back on the kernel's table, so space can be freed once this returns.
         Scheduler.setAddressSpace(null);
         // Read before interrupts are back on and the thread can move, allocate after: with

@@ -5,6 +5,7 @@ import duke.kernel.mm.KernelAddressSpace;
 import duke.kernel.mm.KernelStacks;
 import duke.kernel.mm.PageTable;
 import duke.kernel.time.Timer;
+import duke.kernel.x86.UserState;
 import duke.rt.Magic;
 import duke.rt.SpinLock;
 import duke.rt.Tib;
@@ -64,6 +65,8 @@ public final class Scheduler {
         Task next;
         /** The process the thread is running ({@link #setAddressSpace}), or null on the kernel's table. */
         AddressSpace addressSpace;
+        /** The FS and GS bases and FPU registers of the user code the thread runs, or null. */
+        UserState userState;
 
         public Task(Thread thread) {
             this.thread = thread;
@@ -438,6 +441,12 @@ public final class Scheduler {
         }
         next.state = RUNNING;
         CURRENT[cpu] = next;
+        if (previous.userState != null) {
+            previous.userState.save();
+        }
+        if (next.userState != null) {
+            next.userState.load();
+        }
         if (next.addressSpace != previous.addressSpace) {
             Magic.writeCr3(tableOf(next).root());
         }
@@ -456,6 +465,14 @@ public final class Scheduler {
         Task self = current();
         self.addressSpace = space;
         Magic.writeCr3(tableOf(self).root());
+    }
+
+    /**
+     * Saves and loads {@code state} with this thread from now on, or nothing for null. Interrupts
+     * must be off; the caller loads it the first time.
+     */
+    public static void setUserState(UserState state) {
+        current().userState = state;
     }
 
     /** The process this thread is running, or null. */

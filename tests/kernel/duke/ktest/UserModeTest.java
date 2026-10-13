@@ -68,7 +68,7 @@ final class UserModeTest {
 
     /** Just enough of an assembler for these tests. */
     static final class Code {
-        final byte[] bytes = new byte[256];
+        final byte[] bytes = new byte[1024];
         int size;
 
         Code b(int... values) {
@@ -126,6 +126,30 @@ final class UserModeTest {
 
         Code write(int fd, long buffer, int count) {
             return movEax(SystemCalls.WRITE).movEdi(fd).movRsi(buffer).movEdx(count).syscall();
+        }
+
+        int position() {
+            return size;
+        }
+
+        /** j<cc> rel32 to an earlier {@link #position}: 0x4 for je, 0x5 for jne. */
+        Code jcc(int cc, int target) {
+            int rel = target - (size + 6);
+            return b(0x0F, 0x80 | cc).imm32(rel);
+        }
+
+        Code archPrctl(int code, long address) {
+            return movEax(SystemCalls.ARCH_PRCTL).movEdi(code).movRsi(address).syscall();
+        }
+
+        /** movq xmm{n}, rbx */
+        Code xmmFromRbx(int n) {
+            return b(0x66, n < 8 ? 0x48 : 0x4C, 0x0F, 0x6E, 0xC3 | (n & 7) << 3);
+        }
+
+        /** movq rax, xmm{n} */
+        Code raxFromXmm(int n) {
+            return b(0x66, n < 8 ? 0x48 : 0x4C, 0x0F, 0x7E, 0xC0 | (n & 7) << 3);
         }
 
         Code at(int offset) {
@@ -367,6 +391,89 @@ final class UserModeTest {
                 .b(0xC6, 0x00, 0x01)));
         assertEquals(PF, f.vector, "page fault");
         assertEquals(7, f.errorCode, "present, write, user: paged in by the read-only fault, then refused");
+    }
+
+    static void testArchPrctl() {
+        Program p = new Program();
+        Magic.pokeLong(p.kernelView(64 + 8), 77);
+        // arch_prctl(SET_FS, data + 64); arch_prctl(GET_FS, data + 128); mov rax, fs:[8]; exit(eax)
+        p.load(new Code().archPrctl(SystemCalls.ARCH_SET_FS, p.data + 64).archPrctl(SystemCalls.ARCH_GET_FS, p.data + 128)
+                .b(0x64, 0x48, 0x8B, 0x04, 0x25).imm32(8).exitWithResult());
+        try {
+            assertEquals(77, p.run(), "read through fs");
+            assertEquals(p.data + 64, Magic.peekLong(p.kernelView(128)), "ARCH_GET_FS");
+        } finally {
+            p.free();
+        }
+        long kernel = Magic.addressOf(p);
+        assertEquals(-SystemCalls.EPERM, run(new Code().archPrctl(SystemCalls.ARCH_SET_GS, kernel).exitWithResult()),
+                "a kernel address");
+        assertEquals(-SystemCalls.EINVAL, run(new Code().archPrctl(0x1005, 0).exitWithResult()), "an unknown code");
+        assertEquals(-SystemCalls.EFAULT, run(new Code().archPrctl(SystemCalls.ARCH_GET_GS, BASE).exitWithResult()),
+                "into read-only code");
+        // The first program on this thread set FS; the next one starts from 0 all the same.
+        long data = BASE + 2 * PAGE;
+        assertEquals(0, run(new Code().archPrctl(SystemCalls.ARCH_GET_FS, data + 8)
+                .b(0x48, 0x8B, 0x04, 0x25).imm32(data + 8).exitWithResult()), "FS base of a fresh program");
+    }
+
+    // Limine leaves CR4.OSFXSR clear, which makes every SSE instruction raise #UD.
+    static void testSseWorksInRingThree() {
+        // mov rbx, 5; movq xmm3, rbx; movq rax, xmm3; exit(eax)
+        assertEquals(5, run(new Code().b(0x48, 0xC7, 0xC3).imm32(5).xmmFromRbx(3).raxFromXmm(3).exitWithResult()),
+                "through xmm3");
+    }
+
+    // Thread i keeps i's value in all sixteen xmm registers and at fs:[8] and gs:[8], with bases
+    // that differ per thread, while more threads than CPUs are preempted and moved around. Any
+    // state that isn't saved and restored with the thread shows up as another thread's value.
+    static void testUserStateFollowsTheThread() throws InterruptedException {
+        int count = 6;
+        Program[] programs = new Program[count];
+        long[] results = new long[count];
+        Thread[] threads = new Thread[count];
+        for (int i = 0; i < count; i++) {
+            Program p = new Program();
+            long value = 0x0101_0101_0101L * (i + 1);
+            long fs = p.data + 64 * (i + 1);
+            long gs = fs + 32;
+            Magic.pokeLong(p.kernelView(64 * (i + 1) + 8), value);
+            Magic.pokeLong(p.kernelView(64 * (i + 1) + 32 + 8), value);
+            Code c = new Code().b(0xE9).imm32(12);
+            int bad = c.position();
+            c.exit(1);
+            c.archPrctl(SystemCalls.ARCH_SET_FS, fs).archPrctl(SystemCalls.ARCH_SET_GS, gs);
+            c.b(0x48, 0x8B, 0x1C, 0x25).imm32(fs + 8);                     // mov rbx, [fs + 8]
+            for (int n = 0; n < 16; n++) {
+                c.xmmFromRbx(n);
+            }
+            c.b(0xC6, 0x04, 0x25).imm32(p.data + 1).b(1);                  // started
+            int loop = c.position();
+            for (int n = 0; n < 16; n++) {
+                c.raxFromXmm(n).b(0x48, 0x39, 0xD8).jcc(0x5, bad);          // cmp rax, rbx; jne bad
+            }
+            c.b(0x64, 0x48, 0x8B, 0x04, 0x25).imm32(8).b(0x48, 0x39, 0xD8).jcc(0x5, bad);
+            c.b(0x65, 0x48, 0x8B, 0x04, 0x25).imm32(8).b(0x48, 0x39, 0xD8).jcc(0x5, bad);
+            c.b(0xF3, 0x90).b(0x80, 0x3C, 0x25).imm32(p.data).b(0).jcc(0x4, loop);
+            c.exit(0);
+            p.load(c);
+            programs[i] = p;
+            int index = i;
+            threads[i] = new Thread(() -> results[index] = p.run());
+            threads[i].start();
+        }
+        for (int i = 0; i < count; i++) {
+            awaitStart(programs[i], "program " + i);
+        }
+        Thread.sleep(300);
+        for (int i = 0; i < count; i++) {
+            Magic.pokeByte(programs[i].kernelView(0), (byte) 1);
+        }
+        for (int i = 0; i < count; i++) {
+            threads[i].join();
+            programs[i].free();
+            assertEquals(0, results[i], "program " + i + " kept its registers and bases");
+        }
     }
 
     // More spinning user programs than CPUs, all at the same addresses: the main thread only gets to flip their flags if

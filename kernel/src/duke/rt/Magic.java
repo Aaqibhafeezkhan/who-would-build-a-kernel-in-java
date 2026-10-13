@@ -158,6 +158,12 @@ public final class Magic {
 
     public static native void invalidatePage(long address);
 
+    /** Saves the x87 and SSE registers to the 512 bytes at {@code address}, which must be 16-byte aligned. */
+    public static native void fxsave(long address);
+
+    /** Loads what {@link #fxsave} saved. */
+    public static native void fxrstor(long address);
+
     public static native long readMsr(int msr);
 
     public static native void writeMsr(int msr, long value);

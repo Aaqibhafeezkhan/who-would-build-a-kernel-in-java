@@ -382,6 +382,16 @@ public final class X64 {
         regOp(false, false, cr, src.code(), 0x0F, 0x22);
     }
 
+    /** {@code fxsave64 [m]}: the x87 and SSE state, 512 bytes at a 16-byte-aligned address. */
+    public void fxsave(Mem address) {
+        memOp(true, false, 0, address, 0, 0x0F, 0xAE);
+    }
+
+    /** {@code fxrstor64 [m]}. */
+    public void fxrstor(Mem address) {
+        memOp(true, false, 1, address, 0, 0x0F, 0xAE);
+    }
+
     public void rdmsr() {
         out.emit8(0x0F);
         out.emit8(0x32);

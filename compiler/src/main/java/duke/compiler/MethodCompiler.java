@@ -1002,6 +1002,14 @@ final class MethodCompiler {
                 popLong(RAX);
                 a.invlpg(Mem.at(RAX));
             }
+            case "fxsave" -> {
+                popLong(RAX);
+                a.fxsave(Mem.at(RAX));
+            }
+            case "fxrstor" -> {
+                popLong(RAX);
+                a.fxrstor(Mem.at(RAX));
+            }
             case "readMsr" -> {
                 a.pop(RCX);
                 a.rdmsr();

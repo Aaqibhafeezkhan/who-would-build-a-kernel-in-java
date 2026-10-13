@@ -130,6 +130,8 @@ class X64Test {
                 c("lidt [rax]", "0f 01 18", a -> a.lidt(Mem.at(RAX))),
                 c("lgdt [rax]", "0f 01 10", a -> a.lgdt(Mem.at(RAX))),
                 c("invlpg byte ptr [rax]", "0f 01 38", a -> a.invlpg(Mem.at(RAX))),
+                c("fxsave64 [rax]", "48 0f ae 00", a -> a.fxsave(Mem.at(RAX))),
+                c("fxrstor64 [rdi]", "48 0f ae 0f", a -> a.fxrstor(Mem.at(RDI))),
                 c("mov rax, cr0", "0f 20 c0", a -> a.readCr(0, RAX)),
                 c("mov rax, cr2", "0f 20 d0", a -> a.readCr(2, RAX)),
                 c("mov rax, cr3", "0f 20 d8", a -> a.readCr(3, RAX)),
