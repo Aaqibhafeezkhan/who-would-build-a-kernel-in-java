@@ -91,6 +91,21 @@ final class ElfTest {
         }
     }
 
+    static void testStackGrowsOnDemand() {
+        Elf.Image image = Elf.load(read("bin/hello"), new String[] {"hello"});
+        try {
+            PageTable t = image.space.table();
+            long bottom = Elf.STACK_TOP - Elf.STACK_BYTES;
+            assertEquals(0, t.flags(bottom), "the bottom of the stack has no memory yet");
+            assertTrue(image.space.pageIn(bottom + 8), "a fault there pages it in");
+            assertTrue((t.flags(bottom) & PageTable.WRITABLE) != 0, "writable");
+            assertTrue(!image.space.pageIn(bottom - 8), "the page below the stack stays unmapped");
+            assertTrue(!image.space.pageIn(bottom), "a second fault on the same page isn't a page-in");
+        } finally {
+            image.space.free();
+        }
+    }
+
     static void testInitialStack() {
         Elf.Image image = Elf.load(read("bin/hello"), new String[] {"hello", "world!"});
         try {

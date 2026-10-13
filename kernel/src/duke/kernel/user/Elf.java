@@ -1,5 +1,6 @@
 package duke.kernel.user;
 
+import duke.kernel.mm.AddressSpace;
 import duke.kernel.mm.KernelAddressSpace;
 import duke.kernel.mm.PageTable;
 import duke.kernel.mm.PhysicalMemory;
@@ -29,8 +30,9 @@ public final class Elf {
     }
 
     /** One past the stack's highest byte; the page above stays unmapped. */
-    public static final long STACK_TOP = UserMode.END - PhysicalMemory.PAGE_SIZE;
-    public static final int STACK_PAGES = 64;
+    public static final long STACK_TOP = AddressSpace.END - PhysicalMemory.PAGE_SIZE;
+    /** Linux's default limit. Only what's touched gets memory. */
+    public static final long STACK_BYTES = 8L << 20;
     /** Bigger images are refused before anything is allocated: QEMU has 256 MiB in all. */
     public static final long MAX_IMAGE_BYTES = 64L << 20;
     /** Nothing maps below this, so null pointers and small offsets from them still fault (Linux's mmap_min_addr). */
@@ -69,10 +71,12 @@ public final class Elf {
         AddressSpace space = new AddressSpace();
         try {
             long phdr = 0;
+            long imageEnd = LOWEST;
             for (int i = 0; i < phnum; i++) {
                 int ph = (int) (phoff + (long) i * PHENT);
                 if (u32(file, ph) == PT_LOAD) {
                     loadSegment(space, file, ph);
+                    imageEnd = Math.max(imageEnd, u64(file, ph + 16) + u64(file, ph + 40));
                     long offset = u64(file, ph + 8);
                     if (phoff >= offset && phoff + (long) phnum * PHENT <= offset + u64(file, ph + 32)) {
                         phdr = u64(file, ph + 16) + phoff - offset;
@@ -81,6 +85,8 @@ public final class Elf {
             }
             long entry = u64(file, 24);
             long stack = buildStack(space, argv, entry, phdr, phnum);
+            // A page's gap on either side, so running off the end of one doesn't land in another.
+            space.setMapRange(((imageEnd + PAGE - 1) & -PAGE) + PAGE, STACK_TOP - STACK_BYTES - PAGE);
             return new Image(space, entry, stack);
         } catch (RuntimeException | Error e) {
             space.free();
@@ -121,7 +127,7 @@ public final class Elf {
             if (offset < 0 || filesz < 0 || offset > file.length || filesz > file.length - offset) {
                 throw new IllegalArgumentException("segment " + i + " is outside the file");
             }
-            if (vaddr < LOWEST || memsz < 0 || memsz > STACK_TOP - STACK_PAGES * PAGE - vaddr) {
+            if (vaddr < LOWEST || memsz < 0 || memsz > STACK_TOP - STACK_BYTES - vaddr) {
                 throw new IllegalArgumentException("segment " + i + " is outside user memory");
             }
             if (filesz > memsz) {
@@ -174,13 +180,8 @@ public final class Elf {
      */
     private static long buildStack(AddressSpace space, String[] argv, long entry, long phdr, int phnum) {
         long nx = KernelAddressSpace.noExecuteSupported() ? PageTable.NO_EXECUTE : 0;
-        long topFrame = 0;
-        for (int i = 1; i <= STACK_PAGES; i++) {
-            long frame = space.allocate(STACK_TOP - i * PAGE, PageTable.WRITABLE | nx);
-            if (i == 1) {
-                topFrame = frame;
-            }
-        }
+        space.reserve(STACK_TOP - STACK_BYTES, STACK_BYTES, PageTable.WRITABLE | nx);
+        long topFrame = space.allocate(STACK_TOP - PAGE, PageTable.WRITABLE | nx);
         long view = PhysicalMemory.toVirtual(topFrame) - (STACK_TOP - PAGE);
         long cursor = STACK_TOP - 16;
         long random = cursor;

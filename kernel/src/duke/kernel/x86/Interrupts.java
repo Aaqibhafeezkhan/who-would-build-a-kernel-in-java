@@ -19,6 +19,7 @@ public final class Interrupts {
     private static final Handler[] HANDLERS = new Handler[256];
     private static final int NMI = 2;
     private static final int MACHINE_CHECK = 18;
+    private static final int PAGE_FAULT = 14;
 
     private static final String[] EXCEPTIONS = {
         "#DE divide error", "#DB debug", "NMI", "#BP breakpoint", "#OF overflow", "#BR bound range",
@@ -44,7 +45,12 @@ public final class Interrupts {
         boolean fromUser = Frame.cs(frame) != Gdt.KERNEL_CODE;
         // An exception in ring 3 is the user program's; NMIs and machine checks are the machine's.
         if (fromUser && vector < 32 && vector != NMI && vector != MACHINE_CHECK) {
-            UserMode.fault(frame);
+            if (vector != PAGE_FAULT || !UserMode.pageIn(frame)) {
+                UserMode.fault(frame);
+            }
+            Magic.enableInterrupts();
+            UserMode.interrupted(frame);
+            return;
         }
         Handler handler = HANDLERS[vector];
         if (handler != null) {

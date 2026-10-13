@@ -4,10 +4,10 @@ import static duke.ktest.Assert.assertEquals;
 import static duke.ktest.Assert.assertTrue;
 
 import duke.kernel.Scheduler;
+import duke.kernel.mm.AddressSpace;
 import duke.kernel.mm.KernelAddressSpace;
 import duke.kernel.mm.PageTable;
 import duke.kernel.mm.PhysicalMemory;
-import duke.kernel.user.AddressSpace;
 import duke.kernel.user.SystemCalls;
 import duke.kernel.user.UserMode;
 import duke.rt.Heap;
@@ -19,6 +19,9 @@ final class UserModeTest {
     private static final long PAGE = PhysicalMemory.PAGE_SIZE;
     private static final int GP = 13;
     private static final int PF = 14;
+
+    private static final long MAP_FLOOR = 0x1000_0000L;
+    private static final long MAP_TOP = 0x10_0000_0000L;
 
     /** Where every program's code goes: each has its own address space. */
     private static final long BASE = 0x40_0000;
@@ -35,6 +38,7 @@ final class UserModeTest {
             codeFrame = space.allocate(base, 0);
             long nx = KernelAddressSpace.noExecuteSupported() ? PageTable.NO_EXECUTE : 0;
             dataFrame = space.allocate(data, PageTable.WRITABLE | nx);
+            space.setMapRange(MAP_FLOOR, MAP_TOP);
         }
 
         Program load(Code code) {
@@ -97,6 +101,12 @@ final class UserModeTest {
 
         Code syscall() {
             return b(0x0F, 0x05);
+        }
+
+        /** mmap(0, length, prot, flags, fd, 0). */
+        Code mmap(long length, int prot, int flags, int fd) {
+            return movEax(SystemCalls.MMAP).b(0x31, 0xFF).movRsi(length).movEdx(prot)
+                    .b(0x41, 0xBA).imm32(flags).b(0x49, 0xC7, 0xC0).imm32(fd).b(0x45, 0x31, 0xC9).syscall();
         }
 
         Code exit(int status) {
@@ -277,9 +287,9 @@ final class UserModeTest {
         KernelAddressSpace.table().map(virtual, frame, PageTable.WRITABLE);
         Magic.pokeLong(PhysicalMemory.toVirtual(frame), 99);
         Magic.disableInterrupts();
-        Scheduler.setPageTable(space.table());
+        Scheduler.setAddressSpace(space);
         long seen = Magic.peekLong(virtual);
-        Scheduler.setPageTable(null);
+        Scheduler.setAddressSpace(null);
         Magic.enableInterrupts();
         KernelAddressSpace.table().unmap(virtual);
         PhysicalMemory.free(frame);
@@ -310,6 +320,47 @@ final class UserModeTest {
         survivorThread.join();
         survivor.free();
         assertEquals(5, status[0], "the survivor's exit status");
+    }
+
+    private static final int ANONYMOUS = SystemCalls.MAP_PRIVATE | SystemCalls.MAP_ANONYMOUS;
+    private static final int READ_WRITE = SystemCalls.PROT_READ | SystemCalls.PROT_WRITE;
+
+    // A gigabyte on a machine with 256 MiB: only the two pages touched get memory.
+    static void testMmapIsPagedInOnTouch() {
+        Code code = new Code().mmap(1 << 30, READ_WRITE, ANONYMOUS | SystemCalls.MAP_NORESERVE, -1)
+                .b(0xC6, 0x80).imm32((1 << 30) - 4096).b(7)        // mov byte [rax + 1 GiB - 4096], 7
+                .b(0x0F, 0xB6, 0xB8).imm32((1 << 30) - 4096)       // movzx edi, byte [rax + 1 GiB - 4096]
+                .b(0x03, 0x38)                                     // add edi, [rax]
+                .movEax(SystemCalls.EXIT).syscall();
+        assertEquals(7, run(code), "the last page's write plus the first page's zero");
+    }
+
+    static void testMmapPlacesMappingsApart() {
+        // mov rbx, rax; second mmap; sub rax, rbx; exit(eax): the second one sits right below the first.
+        Code code = new Code().mmap(8192, READ_WRITE, ANONYMOUS, -1).b(0x48, 0x89, 0xC3)
+                .mmap(4096, READ_WRITE, ANONYMOUS, -1).b(0x48, 0x29, 0xD8).exitWithResult();
+        assertEquals(-4096, run(code), "second minus first");
+    }
+
+    static void testMmapRejectsWhatItDoesntSupport() {
+        assertEquals(-SystemCalls.EINVAL, run(new Code().mmap(4096, READ_WRITE, 1 | SystemCalls.MAP_ANONYMOUS, -1)
+                .exitWithResult()), "shared");
+        assertEquals(-SystemCalls.EINVAL, run(new Code().mmap(4096, READ_WRITE, SystemCalls.MAP_PRIVATE, 3)
+                .exitWithResult()), "a file");
+        assertEquals(-SystemCalls.EINVAL, run(new Code().mmap(4096, READ_WRITE, ANONYMOUS | SystemCalls.MAP_FIXED, -1)
+                .exitWithResult()), "fixed");
+        assertEquals(-SystemCalls.EINVAL, run(new Code().mmap(0, READ_WRITE, ANONYMOUS, -1).exitWithResult()), "empty");
+        assertEquals(-SystemCalls.EINVAL, run(new Code().mmap(4096, 0, ANONYMOUS, -1).exitWithResult()), "PROT_NONE");
+        assertEquals(-SystemCalls.ENOMEM, run(new Code().mmap(1L << 40, READ_WRITE, ANONYMOUS, -1).exitWithResult()),
+                "a terabyte");
+    }
+
+    static void testReadOnlyMappingsFaultOnWrite() {
+        // mov byte [rax], 1
+        UserMode.Fault f = fault(new Program().load(new Code().mmap(4096, SystemCalls.PROT_READ, ANONYMOUS, -1)
+                .b(0xC6, 0x00, 0x01)));
+        assertEquals(PF, f.vector, "page fault");
+        assertEquals(7, f.errorCode, "present, write, user: paged in by the read-only fault, then refused");
     }
 
     // More spinning user programs than CPUs, all at the same addresses: the main thread only gets to flip their flags if

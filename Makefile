@@ -85,9 +85,9 @@ ktest: $(DUKEC) $(BUILD)/limine/BOOTX64.EFI
 shell-test: all
 	java tools/ShellTest.java
 
-# jsc programs against node, through both back ends. Needs node, and the x86 back end needs Docker
-# unless this is x86-64 Linux; JS_BACKENDS=java skips it.
-js-test: $(DUKEC)
+# jsc programs against node, on Linux, the Java back end and Duke. Needs node, and the x86 back end
+# needs Docker unless this is x86-64 Linux; JS_BACKENDS=java,duke skips it.
+js-test: $(DUKEC) all
 	java tools/JsTests.java
 
 disasm: $(BUILD)/kernel.elf

@@ -36,7 +36,7 @@ jobs:
       - name: Compiler unit tests
         run: make unit-test
 
-      - name: JavaScript compiler (jsc vs node)
+      - name: JavaScript compiler (jsc vs node, on Linux, the JVM and Duke)
         run: make js-test
 
       - name: Boot test
@@ -75,6 +75,7 @@ jobs:
             build/conformance/boot.txt
             build/panics/*/serial.log
             build/ktest/serial.log
+            build/js-tests/duke/serial.log
             compiler/build/reports/tests/
             compiler/build/test-results/test/*.xml
           if-no-files-found: ignore

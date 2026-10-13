@@ -218,8 +218,8 @@ exception in ring 3 (anything under vector 32 but NMI and machine checks) comes 
 
 `syscall` goes to a compiler-emitted stub (`IA32_LSTAR`) that switches to the recorded kernel
 stack, saves registers in the interrupt frame's layout and calls `SystemCalls.dispatch`, which
-uses Linux's numbers and registers. So far that's `write` to fd 1 or 2 (checking every page of
-the buffer is mapped for ring 3) and `exit`. Ring 3 can load its own GS (one `mov gs` used to
+uses Linux's numbers and registers (the list is below). `write` takes fd 1 or 2 and checks every
+page of the buffer is mapped for ring 3. Ring 3 can load its own GS (one `mov gs` used to
 take the machine down), so both entry paths and `enterUser` `swapgs` at the boundary. Each `run`
 starts ring 3 with a GS base of 0, but nothing saves it per thread yet, so a thread that moves
 CPUs picks up whatever that CPU's last user left there.
@@ -232,17 +232,30 @@ calls `UserMode.interrupted`, whose prologue can yield. The thread may come back
 so every return to ring 3 re-points that CPU's rsp0 at the thread's kernel stack first.
 
 Each process has an `AddressSpace`: its own lower half, the kernel's higher half shared. `run`
-hands its table to the scheduler, which keeps it with the thread and loads CR3 whenever it
+hands it to the scheduler, which keeps it with the thread and loads CR3 whenever it
 switches between threads on different tables, so kernel code reading user memory in a system
 call sees the right process even after moving CPUs. The CR3 write flushes the old process's TLB
 entries, which is all the shootdown single-threaded processes need. `run` goes back to the
 kernel's table before returning, so the space can be freed, with every frame mapped into it.
 
+Memory can also be reserved rather than mapped: the stack and anonymous `mmap`s get page-table
+entries only when a ring 3 page fault lands in them (`AddressSpace.pageIn`, called from
+`Interrupts.dispatch` before treating the fault as fatal, with interrupts off and no heap
+allocation). That's what lets `jsc`'s programs reserve a 1 GiB heap on a 256 MiB machine.
+`write` pages in untouched reserved pages it's asked to read, as the copy's fault would on Linux.
+`mmap` takes private anonymous mappings only, placed top down in the gap between the executable
+and the stack.
+
+System calls so far: `write` (1), `mmap` (9), `exit` (60) and `exit_group` (231), with Linux's
+numbers. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
+the host, put on a FAT disk, and run one after another through the shell in a single boot, with
+the output compared to node's.
+
 `Elf.load` turns a static x86-64 executable into a fresh `AddressSpace`: each `PT_LOAD` segment
 copied into zeroed frames (so bss is free), writable only with `PF_W` and NX without `PF_X`, and
 pages two segments share get both permissions. It refuses dynamic and position-independent
 executables, anything below 64 KiB or reaching the stack, and over 64 MiB in all, before
-allocating. The 256 KiB stack sits under the lower half's last page, with Linux's layout at rsp:
+allocating. The 8 MiB stack sits under the lower half's last page, with Linux's layout at rsp:
 argc, argv, an empty environment and an auxiliary vector (`AT_PHDR`, `AT_PHNUM`, `AT_PAGESZ`,
 `AT_ENTRY`, `AT_RANDOM`) for a static libc's startup. The shell's `run <path>` loads one from the
 FAT disk and runs it on the shell's thread. `tools/FatImage.java` assembles the test executables

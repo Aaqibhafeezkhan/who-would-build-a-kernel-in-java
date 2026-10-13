@@ -1,5 +1,6 @@
 package duke.kernel;
 
+import duke.kernel.mm.AddressSpace;
 import duke.kernel.mm.KernelAddressSpace;
 import duke.kernel.mm.KernelStacks;
 import duke.kernel.mm.PageTable;
@@ -61,8 +62,8 @@ public final class Scheduler {
         int monitorCount;
         /** Run queue, or a monitor's blocked or waiting list: a thread is on at most one. */
         Task next;
-        /** The process's table while the thread is in one ({@link #setPageTable}), else null for the kernel's. */
-        PageTable pageTable;
+        /** The process the thread is running ({@link #setAddressSpace}), or null on the kernel's table. */
+        AddressSpace addressSpace;
 
         public Task(Thread thread) {
             this.thread = thread;
@@ -437,7 +438,7 @@ public final class Scheduler {
         }
         next.state = RUNNING;
         CURRENT[cpu] = next;
-        if (next.pageTable != previous.pageTable) {
+        if (next.addressSpace != previous.addressSpace) {
             Magic.writeCr3(tableOf(next).root());
         }
         swap(Magic.addressOf(previous.rsp) + Tib.ARRAY_DATA, next.rsp[0]);
@@ -448,22 +449,22 @@ public final class Scheduler {
     }
 
     /**
-     * Loads {@code table} for this thread from now on, here and wherever it's switched back in, or
-     * the kernel's for null. Interrupts must be off, so the thread can't move in between.
+     * Runs this thread on {@code space}'s table from now on, here and wherever it's switched back
+     * in, or the kernel's for null. Interrupts must be off, so the thread can't move in between.
      */
-    public static void setPageTable(PageTable table) {
+    public static void setAddressSpace(AddressSpace space) {
         Task self = current();
-        self.pageTable = table;
+        self.addressSpace = space;
         Magic.writeCr3(tableOf(self).root());
     }
 
-    /** The table this thread runs on. */
-    public static PageTable pageTable() {
-        return tableOf(current());
+    /** The process this thread is running, or null. */
+    public static AddressSpace addressSpace() {
+        return current().addressSpace;
     }
 
     private static PageTable tableOf(Task task) {
-        return task.pageTable != null ? task.pageTable : KernelAddressSpace.table();
+        return task.addressSpace != null ? task.addressSpace.table() : KernelAddressSpace.table();
     }
 
     /** Only longs in this frame, so the collector can start a parked thread's walk at its caller. */

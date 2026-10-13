@@ -12,6 +12,9 @@ public final class Frame {
     public static final String[] REGISTERS = {
         "r15", "r14", "r13", "r12", "r11", "r10", "r9", "r8", "rdi", "rsi", "rbp", "rbx", "rdx", "rcx", "rax"};
 
+    public static final int R10 = 5;
+    public static final int R9 = 6;
+    public static final int R8 = 7;
     public static final int RDI = 8;
     public static final int RSI = 9;
     public static final int RBP = 10;

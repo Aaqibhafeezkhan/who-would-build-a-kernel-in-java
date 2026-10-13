@@ -2,7 +2,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -27,7 +29,7 @@ public class JsTests {
     static final Path JSC = ROOT.resolve("compiler/build/install/dukec/bin/jsc");
 
     /** Which back ends to run, from JS_BACKENDS (default both): handy without Docker, which x86 needs off Linux. */
-    static final String BACKENDS = System.getenv().getOrDefault("JS_BACKENDS", "x86,java");
+    static final String BACKENDS = System.getenv().getOrDefault("JS_BACKENDS", "x86,java,duke");
 
     record Result(String output, int exit) {}
 
@@ -38,6 +40,7 @@ public class JsTests {
             programs = files.filter(p -> p.toString().endsWith(".js")).sorted().toList();
         }
         List<String> wanted = List.of(args);
+        Map<String, Result> onDuke = BACKENDS.contains("duke") ? runOnDuke(programs, wanted) : Map.of();
         int failures = 0;
         int ran = 0;
         for (Path program : programs) {
@@ -51,6 +54,9 @@ public class JsTests {
             boolean javaOnly = Files.readAllLines(program).get(0).equals("// backends: java");
             if (BACKENDS.contains("x86") && !javaOnly) {
                 failures += check(name + " (x86)", expected, () -> runX86(program, name));
+            }
+            if (BACKENDS.contains("duke") && !javaOnly) {
+                failures += check(name + " (duke)", expected, () -> onDuke.getOrDefault(name, new Result("not run: an earlier program hung the kernel\n", -1)));
             }
             if (BACKENDS.contains("java")) {
                 failures += check(name + " (java)", expected, () -> runJava(program, name));
@@ -117,6 +123,87 @@ public class JsTests {
                 }
             }
             """;
+
+    /**
+     * The x86 executables, all on one FAT disk, each run by the shell's {@code run} in one boot of
+     * the kernel. What the shell prints between the command and its next prompt is the program's
+     * output, less the "exit status" line it adds for a nonzero exit.
+     */
+    static Map<String, Result> runOnDuke(List<Path> programs, List<String> wanted) throws Exception {
+        Path dir = OUT.resolve("duke");
+        Files.createDirectories(dir);
+        Map<String, byte[]> files = new LinkedHashMap<>();
+        Map<String, Result> results = new LinkedHashMap<>();
+        for (Path program : programs) {
+            String name = program.getFileName().toString().replaceAll("\\.js$", "");
+            if (!wanted.isEmpty() && !wanted.contains(name)) {
+                continue;
+            }
+            Path exe = dir.resolve(name);
+            Result compiled = run(List.of(JSC.toString(), program.toString(), "--output", exe.toString()));
+            if (compiled.exit() != 0) {
+                results.put(name, compiled);
+            } else {
+                files.put("js/" + name, Files.readAllBytes(exe));
+            }
+        }
+        Path image = dir.resolve("js.img");
+        FatImage.write(image, files, List.of());
+        Process qemu = new ProcessBuilder("tools/qemu.sh", ShellTest.ESP.toString(), "-serial", "stdio",
+                "-drive", "if=none,id=js,format=raw,snapshot=on,file=" + image, "-device", "virtio-blk-pci,drive=js")
+                .directory(ROOT.toFile())
+                .redirectErrorStream(true)
+                .start();
+        Thread reader = new Thread(() -> ShellTest.pump(qemu.getInputStream()));
+        reader.setDaemon(true);
+        reader.start();
+        try {
+            if (!ShellTest.await("duke> ", 0)) {
+                throw new IllegalStateException("the kernel never reached its prompt:\n"
+                        + ShellTest.clean(ShellTest.output.toString()).indent(4));
+            }
+            for (String name : files.keySet()) {
+                String path = "/" + name;
+                int from = ShellTest.output.length();
+                ShellTest.type(qemu.getOutputStream(), "run " + path + "\n");
+                if (!awaitPrompt(from)) {
+                    results.put(name.substring(3), new Result("timed out:\n" + ShellTest.clean(ShellTest.output.substring(from)), -1));
+                    break;
+                }
+                // The shell echoes each key with a cursor redraw, so skip the whole command line.
+                String shown = ShellTest.clean(ShellTest.output.substring(from));
+                int start = shown.indexOf('\n') + 1;
+                String out = shown.substring(start, shown.indexOf("duke> ", start));
+                int exit = 0;
+                String status = path + ": exit status ";
+                int at = out.lastIndexOf(status);
+                if (at >= 0 && out.endsWith("\n") && out.indexOf('\n', at) == out.length() - 1) {
+                    exit = Integer.parseInt(out.substring(at + status.length(), out.length() - 1));
+                    out = out.substring(0, at);
+                }
+                results.put(name.substring(3), new Result(out, exit));
+            }
+        } finally {
+            qemu.destroy();
+            qemu.waitFor(10, TimeUnit.SECONDS);
+            Files.writeString(dir.resolve("serial.log"), ShellTest.output.toString());
+        }
+        return results;
+    }
+
+    /** Waits for the prompt the shell prints once the command typed after {@code from} finishes. */
+    static boolean awaitPrompt(int from) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + ShellTest.TIMEOUT_MILLIS;
+        while (System.currentTimeMillis() < deadline) {
+            String shown = ShellTest.clean(ShellTest.output.substring(from));
+            int start = shown.indexOf('\n');
+            if (start >= 0 && shown.indexOf("duke> ", start) >= 0) {
+                return true;
+            }
+            Thread.sleep(50);
+        }
+        return false;
+    }
 
     static Result runJava(Path program, String name) throws Exception {
         Path dir = OUT.resolve(name + "-java");

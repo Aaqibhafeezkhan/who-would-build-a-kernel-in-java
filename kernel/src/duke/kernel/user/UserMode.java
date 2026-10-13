@@ -2,6 +2,7 @@ package duke.kernel.user;
 
 import duke.kernel.Scheduler;
 import duke.kernel.Smp;
+import duke.kernel.mm.AddressSpace;
 import duke.kernel.x86.Frame;
 import duke.kernel.x86.Gdt;
 import duke.kernel.x86.Interrupts;
@@ -35,9 +36,6 @@ public final class UserMode {
             this.address = address;
         }
     }
-
-    /** One past the highest user address: the lower half. */
-    public static final long END = 0x0000_8000_0000_0000L;
 
     private static final int IA32_EFER = 0xC0000080;
     private static final int IA32_STAR = 0xC0000081;
@@ -78,11 +76,11 @@ public final class UserMode {
     public static long run(AddressSpace space, long entry, long stack) {
         long flags = Magic.flags();
         Magic.disableInterrupts();
-        Scheduler.setPageTable(space.table());
+        Scheduler.setAddressSpace(space);
         Magic.writeMsr(IA32_KERNEL_GS_BASE, 0);
         long status = Magic.enterUser(entry, stack);
         // Back on the kernel's table, so space can be freed once this returns.
-        Scheduler.setPageTable(null);
+        Scheduler.setAddressSpace(null);
         // Read before interrupts are back on and the thread can move, allocate after: with
         // interrupts off, a collection waiting on this CPU would never get it to stop.
         int cpu = Magic.cpuIndex();
@@ -97,6 +95,15 @@ public final class UserMode {
             throw new Fault((int) vector, rip, error, address);
         }
         return status;
+    }
+
+    /**
+     * A page fault in ring 3 that the process's reservations cover: maps the page and returns true,
+     * for the instruction to run again.
+     */
+    public static boolean pageIn(long frame) {
+        boolean notPresent = (Frame.errorCode(frame) & 1) == 0;
+        return notPresent && Scheduler.addressSpace().pageIn(Magic.readCr2());
     }
 
     /** An exception in ring 3: back out of user mode for {@link #run} to throw. */
