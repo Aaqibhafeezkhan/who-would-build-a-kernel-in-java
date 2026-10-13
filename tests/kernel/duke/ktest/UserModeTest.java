@@ -243,6 +243,54 @@ final class UserModeTest {
             p.free();
         }
     }
+    static void testUnameWritesExpectedFields() {
+        Program p = new Program();
+        int offset = 64;
+
+        p.load(new Code()
+                .movEax(SystemCalls.UNAME)
+                .movEdi((int) (p.data + offset))
+                .syscall()
+                .exitWithResult());
+
+        try {
+            assertEquals(0, p.run(), "uname");
+
+            // sysname: "Duke\0"
+            assertEquals('D', Magic.peekByte(p.kernelView(offset)) & 0xFF, "sysname");
+            assertEquals('u', Magic.peekByte(p.kernelView(offset + 1)) & 0xFF, "sysname");
+            assertEquals('k', Magic.peekByte(p.kernelView(offset + 2)) & 0xFF, "sysname");
+            assertEquals('e', Magic.peekByte(p.kernelView(offset + 3)) & 0xFF, "sysname");
+            assertEquals(0, Magic.peekByte(p.kernelView(offset + 4)) & 0xFF,
+                    "sysname terminator");
+
+            // machine: "x86_64\0", the fifth 65-byte field.
+            int machineOffset = offset + 4 * 65;
+            assertEquals('x', Magic.peekByte(p.kernelView(machineOffset)) & 0xFF, "machine");
+            assertEquals('8', Magic.peekByte(p.kernelView(machineOffset + 1)) & 0xFF, "machine");
+            assertEquals('6', Magic.peekByte(p.kernelView(machineOffset + 2)) & 0xFF, "machine");
+            assertEquals('_', Magic.peekByte(p.kernelView(machineOffset + 3)) & 0xFF, "machine");
+            assertEquals('6', Magic.peekByte(p.kernelView(machineOffset + 4)) & 0xFF, "machine");
+            assertEquals('4', Magic.peekByte(p.kernelView(machineOffset + 5)) & 0xFF, "machine");
+            assertEquals(0, Magic.peekByte(p.kernelView(machineOffset + 6)) & 0xFF,
+                    "machine terminator");
+        } finally {
+            p.free();
+        }
+    }
+
+    static void testUnameRejectsReadOnlyBuffer() {
+        Code code = new Code()
+                .movEax(SystemCalls.UNAME)
+                .movEdi((int) (BASE + 64))
+                .syscall()
+                .exitWithResult();
+
+        assertEquals(
+                -SystemCalls.EFAULT,
+                run(code),
+                "uname with read-only buffer");
+    }
 
     static void testWriteChecksItsArguments() {
         Program p = new Program();

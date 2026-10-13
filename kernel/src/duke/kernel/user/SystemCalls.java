@@ -27,6 +27,7 @@ public final class SystemCalls {
     public static final int FORK = 57;
     public static final int EXECVE = 59;
     public static final int WAIT4 = 61;
+    public static final int UNAME = 63;
     public static final int GETPPID = 110;
     public static final int ARCH_PRCTL = 158;
     public static final int EXIT = 60;
@@ -121,6 +122,8 @@ public final class SystemCalls {
         } else if (number == WAIT4) {
             result = wait4((int) a0, Frame.register(frame, Frame.RSI), Frame.register(frame, Frame.RDX),
                     Frame.register(frame, Frame.R10));
+        } else if (number == UNAME) {
+            result = uname(a0);
         } else if (number == FORK) {
             result = fork(frame);
         } else if (number == EXECVE) {
@@ -443,4 +446,34 @@ public final class SystemCalls {
         }
         return true;
     }
+    private static final int UTSNAME_FIELD_BYTES = 65;
+    private static final int UTSNAME_BYTES = 6 * UTSNAME_FIELD_BYTES;
+
+    /**
+     * Writes the six fields of the x86-64 struct utsname.
+     * Validates the entire output buffer before writing anything.
+     */
+    private static long uname(long buffer) {
+        if (!userWritable(buffer, UTSNAME_BYTES)) {
+            return -EFAULT;
+        }
+
+        writeUnameField(buffer, "Duke");
+        writeUnameField(buffer + UTSNAME_FIELD_BYTES, "duke");
+        writeUnameField(buffer + 2L * UTSNAME_FIELD_BYTES, "0.8");
+        writeUnameField(buffer + 3L * UTSNAME_FIELD_BYTES, "duke");
+        writeUnameField(buffer + 4L * UTSNAME_FIELD_BYTES, "x86_64");
+        writeUnameField(buffer + 5L * UTSNAME_FIELD_BYTES, "(none)");
+
+        return 0;
+    }
+
+    /** Writes one 65-byte, NUL-terminated and zero-padded field. */
+    private static void writeUnameField(long address, String value) {
+        for (int i = 0; i < UTSNAME_FIELD_BYTES; i++) {
+            byte b = i < value.length() ? (byte) value.charAt(i) : 0;
+            Magic.pokeByte(address + i, b);
+        }
+    }
+
 }
