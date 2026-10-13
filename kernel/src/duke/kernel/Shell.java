@@ -5,6 +5,8 @@ import duke.kernel.fs.Fat;
 import duke.kernel.mm.PhysicalMemory;
 import duke.kernel.pci.Pci;
 import duke.kernel.time.Timer;
+import duke.kernel.user.Elf;
+import duke.kernel.user.UserMode;
 import duke.rt.Heap;
 import java.util.ArrayList;
 import java.util.List;
@@ -109,7 +111,7 @@ public final class Shell {
         }
         switch (words.get(0)) {
             case "help" -> {
-                Console.println("commands: help, uptime, mem, gc, cpus, threads, pci, ls [path], cat <path>, echo <text>, clear, panic");
+                Console.println("commands: help, uptime, mem, gc, cpus, threads, pci, ls [path], cat <path>, run <path>, echo <text>, clear, panic");
                 if (!Commands.names().isEmpty()) {
                     StringBuilder more = new StringBuilder("also:");
                     for (int i = 0; i < Commands.names().size(); i++) {
@@ -146,6 +148,13 @@ public final class Shell {
                     cat(words.get(1));
                 }
             }
+            case "run" -> {
+                if (words.size() < 2) {
+                    Console.println("usage: run <path>");
+                } else {
+                    run(words.get(1));
+                }
+            }
             case "echo" -> Console.println(line.substring(4).strip());
             case "panic" -> Panic.panic("requested from the shell");
             default -> {
@@ -170,6 +179,32 @@ public final class Shell {
             }
         } catch (IllegalArgumentException e) {
             Console.println("ls: " + e.getMessage());
+        }
+    }
+
+    /** Runs a static executable from the disk on this thread, and says how it ended unless it exited 0. */
+    private static void run(String path) {
+        Fat fs = Fat.mounted();
+        if (fs == null) {
+            Console.println("run: no filesystem mounted");
+            return;
+        }
+        Elf.Image image;
+        try {
+            image = Elf.load(fs.read(path), new String[] {path});
+        } catch (IllegalArgumentException e) {
+            Console.println("run: " + path + ": " + e.getMessage());
+            return;
+        }
+        try {
+            long status = UserMode.run(image.space, image.entry, image.stack);
+            if (status != 0) {
+                Console.println(path + ": exit status " + status);
+            }
+        } catch (UserMode.Fault f) {
+            Console.println(path + ": " + f.getMessage());
+        } finally {
+            image.space.free();
         }
     }
 

@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +57,74 @@ public class FatImage {
             big[i] = (byte) (i * 7 + 3);
         }
         files.put("big.bin", big);
+        files.put("bin/hello", helloElf());
+        files.put("bin/crash", crashElf());
         return files;
+    }
+
+    static final long ELF_BASE = 0x400000;
+    static final int ELF_HEADERS = 64 + 3 * 56;
+
+    /**
+     * Prints "hello from ring 3, I am " and its argv[0], then checks its bss: a word in the data
+     * page past the file's bytes and one in a page with none must start at zero and take a write.
+     * Exits 0 if they did. Code and data are separate segments, plus a PT_GNU_STACK to skip.
+     */
+    static byte[] helloElf() {
+        long data = ELF_BASE + 0x1000;
+        long bss1 = data + 0x800;
+        long bss2 = data + 0x1800;
+        byte[] message = "hello from ring 3, I am \n".getBytes(StandardCharsets.US_ASCII);
+        ByteBuffer code = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
+        code.put((byte) 0xB8).putInt(1).put((byte) 0xBF).putInt(1);                  // write(1,
+        code.put((byte) 0xBE).putInt((int) data).put((byte) 0xBA).putInt(message.length - 1);  // message)
+        code.put(new byte[] {0x0F, 0x05});
+        code.put(new byte[] {0x48, (byte) 0x8B, 0x74, 0x24, 0x08});                  // mov rsi, argv[0]
+        code.put(new byte[] {0x31, (byte) 0xD2});                                    // xor edx, edx
+        code.put(new byte[] {(byte) 0x80, 0x3C, 0x16, 0x00, 0x74, 0x05});            // cmp byte [rsi+rdx], 0; je
+        code.put(new byte[] {0x48, (byte) 0xFF, (byte) 0xC2, (byte) 0xEB, (byte) 0xF5});  // inc rdx; jmp back
+        code.put((byte) 0xB8).putInt(1).put((byte) 0xBF).putInt(1).put(new byte[] {0x0F, 0x05});  // write(1, argv[0])
+        code.put((byte) 0xB8).putInt(1).put((byte) 0xBF).putInt(1);                  // write(1, "\n")
+        code.put((byte) 0xBE).putInt((int) data + message.length - 1).put((byte) 0xBA).putInt(1);
+        code.put(new byte[] {0x0F, 0x05});
+        code.put(new byte[] {(byte) 0xC7, 0x04, 0x25}).putInt((int) bss2).putInt(7);  // mov dword [bss2], 7
+        code.put(new byte[] {(byte) 0x8B, 0x3C, 0x25}).putInt((int) bss1);           // mov edi, [bss1]
+        code.put(new byte[] {0x03, 0x3C, 0x25}).putInt((int) bss2);                  // add edi, [bss2]
+        code.put(new byte[] {(byte) 0x81, (byte) 0xEF}).putInt(7);                   // sub edi, 7
+        code.put((byte) 0xB8).putInt(60).put(new byte[] {0x0F, 0x05});               // exit(edi)
+        int codeBytes = code.position();
+        ByteBuffer elf = elfHeader(0x1000 + message.length, 3);
+        elf.put(Arrays.copyOf(code.array(), codeBytes));
+        programHeader(elf, 0, 1, 5, 0, ELF_BASE, ELF_HEADERS + codeBytes, ELF_HEADERS + codeBytes);
+        programHeader(elf, 1, 1, 6, 0x1000, data, message.length, 0x2000);
+        programHeader(elf, 2, 0x6474E551, 6, 0, 0, 0, 0);
+        elf.put(0x1000, message);
+        return elf.array();
+    }
+
+    /** hlt, which ring 3 isn't allowed. */
+    static byte[] crashElf() {
+        ByteBuffer elf = elfHeader(ELF_HEADERS + 1, 1);
+        elf.put((byte) 0xF4);
+        programHeader(elf, 0, 1, 5, 0, ELF_BASE, ELF_HEADERS + 1, ELF_HEADERS + 1);
+        return elf.array();
+    }
+
+    /** An executable's header, with its entry point right after the program headers, and the buffer positioned there. */
+    private static ByteBuffer elfHeader(int size, int programHeaders) {
+        ByteBuffer elf = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN);
+        elf.put(new byte[] {0x7F, 'E', 'L', 'F', 2, 1, 1});
+        elf.putShort(16, (short) 2).putShort(18, (short) 62).putInt(20, 1).putLong(24, ELF_BASE + ELF_HEADERS);
+        elf.putLong(32, 64).putShort(52, (short) 64).putShort(54, (short) 56).putShort(56, (short) programHeaders);
+        elf.position(ELF_HEADERS);
+        return elf;
+    }
+
+    private static void programHeader(ByteBuffer elf, int index, int type, int flags, long offset, long vaddr,
+            long filesz, long memsz) {
+        int at = 64 + 56 * index;
+        elf.putInt(at, type).putInt(at + 4, flags).putLong(at + 8, offset).putLong(at + 16, vaddr)
+                .putLong(at + 24, vaddr).putLong(at + 32, filesz).putLong(at + 40, memsz).putLong(at + 48, 0x1000);
     }
 
     public static void writeSample(Path image) throws Exception {

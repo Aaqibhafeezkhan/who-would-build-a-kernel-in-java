@@ -161,7 +161,7 @@ its BDF by `tools/GenerateFont.java` into a string literal, so the glyphs are im
 PS/2 keyboard (IRQ 1, scan code set 1, US layout) and COM1's receive interrupt (IRQ 4) both push
 characters into `Input`, a ring buffer of image arrays, so handlers never allocate. After the boot
 log, `Kernel.main` runs `Shell`: line editing plus `help`, `uptime`, `mem`, `gc`, `cpus`,
-`threads`, `pci`, `ls`, `cat`, `echo` and `panic`. `make shell-test` boots the real kernel with serial on pipes and the QEMU monitor on a
+`threads`, `pci`, `ls`, `cat`, `run`, `echo` and `panic`. `make shell-test` boots the real kernel with serial on pipes and the QEMU monitor on a
 socket. It types over serial and as PS/2 keystrokes (`sendkey`) and checks the replies.
 
 ## Threads
@@ -237,6 +237,16 @@ switches between threads on different tables, so kernel code reading user memory
 call sees the right process even after moving CPUs. The CR3 write flushes the old process's TLB
 entries, which is all the shootdown single-threaded processes need. `run` goes back to the
 kernel's table before returning, so the space can be freed, with every frame mapped into it.
+
+`Elf.load` turns a static x86-64 executable into a fresh `AddressSpace`: each `PT_LOAD` segment
+copied into zeroed frames (so bss is free), writable only with `PF_W` and NX without `PF_X`, and
+pages two segments share get both permissions. It refuses dynamic and position-independent
+executables, anything below 64 KiB or reaching the stack, and over 64 MiB in all, before
+allocating. The 256 KiB stack sits under the lower half's last page, with Linux's layout at rsp:
+argc, argv, an empty environment and an auxiliary vector (`AT_PHDR`, `AT_PHNUM`, `AT_PAGESZ`,
+`AT_ENTRY`, `AT_RANDOM`) for a static libc's startup. The shell's `run <path>` loads one from the
+FAT disk and runs it on the shell's thread. `tools/FatImage.java` assembles the test executables
+by hand, so the build needs no cross toolchain.
 
 ### Monitors
 

@@ -86,6 +86,9 @@ public class ShellTest {
             failures += check("ls", () -> type(serial, "ls\n"), "A Long File Name.md  16");
             failures += check("cat", () -> type(serial, "cat hello.txt\n"), "hello from FAT32");
             failures += check("cat nested", () -> type(serial, "cat docs/deeper/notes.txt\n"), "nested");
+            failures += check("run", () -> type(serial, "run /bin/hello\n"), "hello from ring 3, I am /bin/hello");
+            failures += check("run a crash", () -> type(serial, "run bin/crash\n"), "bin/crash: #GP");
+            failures += check("run a text file", () -> type(serial, "run hello.txt\n"), "run: hello.txt: not an ELF file");
             failures += check("ps/2 insert", () -> keys(monitor, "e c h o spc d u e left k ret"), "duke");
             failures += check("javascript command", () -> type(serial, "hello\n"),
                     "hello from JavaScript running in the Duke kernel");
