@@ -1,5 +1,6 @@
 package duke.conformance;
-
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -266,6 +267,53 @@ final class Collections2 {
         Collections.reverse(nums);
         Collections.swap(nums, 0, 3);
         return sb + " " + nums + " " + Collections.emptyList().size() + " " + Collections.emptyList();
+    }
+
+    static String arrayDequeBasics() {
+        Deque<String> d = new ArrayDeque<>();
+        d.addLast("b");
+        d.addLast("c");
+        d.addFirst("a");
+        d.offerLast("d");
+        d.push("z");
+        return d + " " + d.size() + " " + d.peekFirst() + " " + d.peekLast() + " "
+            + d.pop() + " " + d.pollLast() + " " + d.removeFirst() + " " + d;
+    }
+
+    static String arrayDequeGrowsAndWraps() {
+        Deque<Integer> d = new ArrayDeque<>();
+        for (int i = 0; i < 5; i++) {
+            d.addLast(i);
+        }
+        for (int i = 0; i < 3; i++) {
+            d.removeFirst();
+        }
+        for (int i = 10; i < 30; i++) {
+            d.addLast(i);
+        }
+        d.addFirst(-1);
+        StringBuilder sb = new StringBuilder();
+        for (Integer x : d) {
+            sb.append(x).append(',');
+        }
+        return sb + " " + d.size() + " " + d.getFirst() + " " + d.getLast();
+    }
+
+    static String arrayDequeEmpty() {
+        Deque<String> d = new ArrayDeque<>();
+        StringBuilder sb = new StringBuilder();
+        sb.append(d.isEmpty()).append(' ').append(d.pollFirst()).append(' ').append(d.peekLast()).append(' ');
+        try {
+            d.removeFirst();
+        } catch (NoSuchElementException e) {
+            sb.append("nse ");
+        }
+        try {
+            d.pop();
+        } catch (NoSuchElementException e) {
+            sb.append("nse2");
+        }
+        return sb.toString();
     }
 
     static String selfReferenceToString() {
