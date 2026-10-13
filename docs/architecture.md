@@ -246,8 +246,13 @@ allocation). That's what lets `jsc`'s programs reserve a 1 GiB heap on a 256 MiB
 `mmap` takes private anonymous mappings only, placed top down in the gap between the executable
 and the stack.
 
-System calls so far: `write` (1), `mmap` (9), `exit` (60) and `exit_group` (231), with Linux's
-numbers. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
+A `Process` wraps that: a pid, a parent, an address space and the kernel thread that runs it.
+It frees its memory as soon as it ends but stays in the table as a zombie until its parent's
+`wait4` or, for one the kernel started, `waitFor` collects its status. A process whose parent has
+ended is dropped as soon as it ends itself. The shell's `run` starts one and waits.
+
+System calls so far: `write` (1), `mmap` (9), `getpid` (39), `exit` (60), `wait4` (61), `getppid`
+(110) and `exit_group` (231), with Linux's numbers. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
 the host, put on a FAT disk, and run one after another through the shell in a single boot, with
 the output compared to node's.
 

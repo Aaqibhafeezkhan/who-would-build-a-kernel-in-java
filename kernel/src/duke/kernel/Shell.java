@@ -6,6 +6,7 @@ import duke.kernel.mm.PhysicalMemory;
 import duke.kernel.pci.Pci;
 import duke.kernel.time.Timer;
 import duke.kernel.user.Elf;
+import duke.kernel.user.Process;
 import duke.kernel.user.UserMode;
 import duke.rt.Heap;
 import java.util.ArrayList;
@@ -182,7 +183,7 @@ public final class Shell {
         }
     }
 
-    /** Runs a static executable from the disk on this thread, and says how it ended unless it exited 0. */
+    /** Runs a static executable from the disk as a process, and says how it ended unless it exited 0. */
     private static void run(String path) {
         Fat fs = Fat.mounted();
         if (fs == null) {
@@ -197,14 +198,14 @@ public final class Shell {
             return;
         }
         try {
-            long status = UserMode.run(image.space, image.entry, image.stack);
+            long status = Process.start(path, null, image).waitFor();
             if (status != 0) {
                 Console.println(path + ": exit status " + status);
             }
         } catch (UserMode.Fault f) {
             Console.println(path + ": " + f.getMessage());
-        } finally {
-            image.space.free();
+        } catch (InterruptedException e) {
+            Console.println(path + ": interrupted");
         }
     }
 

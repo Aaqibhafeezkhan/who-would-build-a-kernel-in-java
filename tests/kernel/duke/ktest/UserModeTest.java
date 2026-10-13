@@ -8,6 +8,7 @@ import duke.kernel.mm.AddressSpace;
 import duke.kernel.mm.KernelAddressSpace;
 import duke.kernel.mm.PageTable;
 import duke.kernel.mm.PhysicalMemory;
+import duke.kernel.user.Process;
 import duke.kernel.user.SystemCalls;
 import duke.kernel.user.UserMode;
 import duke.rt.Heap;
@@ -27,7 +28,7 @@ final class UserModeTest {
     private static final long BASE = 0x40_0000;
 
     /** A read-only code page at BASE, an unmapped page, then a writable data and stack page. */
-    private static final class Program {
+    static final class Program {
         final long base = BASE;
         final long data = BASE + 2 * PAGE;
         final AddressSpace space = new AddressSpace();
@@ -55,13 +56,18 @@ final class UserModeTest {
             return UserMode.run(space, base, data + PAGE);
         }
 
+        /** As a process, which frees the space when it ends: don't {@link #free} it as well. */
+        Process start(Process parent) {
+            return Process.start("test", parent, space, base, data + PAGE);
+        }
+
         void free() {
             space.free();
         }
     }
 
     /** Just enough of an assembler for these tests. */
-    private static final class Code {
+    static final class Code {
         final byte[] bytes = new byte[256];
         int size;
 
