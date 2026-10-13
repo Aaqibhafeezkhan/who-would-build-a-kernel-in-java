@@ -67,5 +67,7 @@ must not allocate.
 - Run `make test` before pushing. CI runs the same targets on your PR automatically (GitHub may
   hold the very first run from a brand-new account for approval, as a spam guard).
 - Match the surrounding code: comments explain *why*, not *what*.
+- CI fails on trailing whitespace, including whitespace-only lines. `git diff --check master`
+  shows any locally, and most editors follow `.editorconfig` to avoid it.
 - Maintainers: "Enable auto-merge" on an approved PR (or `gh pr merge --auto --squash`) merges it
   as soon as CI is green, so nobody has to wait around to click.

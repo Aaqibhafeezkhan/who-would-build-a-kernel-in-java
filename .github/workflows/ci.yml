@@ -15,6 +15,19 @@ permissions:
   contents: read
 
 jobs:
+  whitespace:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      # A pull request is checked out as its merge into the base branch, so HEAD^1 is the base.
+      - name: No trailing whitespace or blank lines at end of file
+        run: git diff --check HEAD^1 HEAD
+
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
