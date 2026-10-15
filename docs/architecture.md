@@ -271,8 +271,17 @@ image into a fresh address space first, so a bad path or file returns an error t
 then it leaves user mode the way `exit` does, with `UserMode.EXECED` as the status, and the
 process's thread frees the old image and runs the new one. The pid, parent and files carry over.
 
+Ctrl-C kills the foreground process and everything forked from it: a process the kernel starts
+leads a group its descendants join, as a shell job would. While `run` waits, the input layer takes
+Ctrl-C as a flag for the shell rather than a character for the program, and the shell sets the
+group's `killed`. Each process checks it on the way back to ring 3, after a system call or an
+interrupt, and leaves with `UserMode.KILLED` instead; the timer interrupt is what reaches one
+spinning in user code, on whatever CPU it's on. A console read stops waiting for it too. A `wait4`
+needs nothing extra, since the children it waits on are in the same group and wake it as they end.
+The wait status says SIGINT, and the memory goes back as for any exit.
+
 System calls so far: `read` (0), `write` (1), `open` (2), `close` (3), `fstat` (5), `lseek` (8),
-`mmap` (9), `getpid` (39), `fork` (57), `execve` (59), `exit` (60), `wait4` (61), `getppid` (110),
+`mmap` (9), `getpid` (39), `fork` (57), `execve` (59), `exit` (60), `wait4` (61), `uname` (63), `getppid` (110),
 `arch_prctl` (158), `exit_group` (231) and `openat` (257), with Linux's numbers. `SystemCalls.dispatch` is entered from
 the syscall stub without a class-initialization check, so `SystemCalls` keeps no statics that need
 one. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on

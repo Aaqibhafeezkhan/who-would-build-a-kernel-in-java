@@ -32,13 +32,19 @@ public final class Shell {
         }
     }
 
-    /** A line typed at the console, edited and echoed as it's typed, without its newline. */
+    /**
+     * A line typed at the console, edited and echoed as it's typed, without its newline. Null if
+     * the calling process is killed while it waits.
+     */
     public static String readLine() {
         StringBuilder line = new StringBuilder();
         int pos = 0;
 
         while (true) {
             int c = Input.take();
+            if (c == Input.KILLED) {
+                return null;
+            }
             if (c == '\n') {
                 Console.println("");
                 return line.toString();
@@ -204,7 +210,7 @@ public final class Shell {
             return;
         }
         try {
-            long status = Process.start(path, null, image).waitFor();
+            long status = waitInForeground(Process.start(path, null, image));
             if (status != 0) {
                 Console.println(path + ": exit status " + status);
             }
@@ -213,6 +219,23 @@ public final class Shell {
         } catch (InterruptedException e) {
             Console.println(path + ": interrupted");
         }
+    }
+
+    /** Waits for {@code p} to end, killing it if Ctrl-C is typed meanwhile, and returns its exit status. */
+    private static long waitInForeground(Process p) throws InterruptedException {
+        Input.setForeground(true);
+        try {
+            while (!p.ended()) {
+                if (Input.takeInterrupt()) {
+                    Console.println("^C");
+                    p.kill();
+                }
+                Thread.sleep(10);
+            }
+        } finally {
+            Input.setForeground(false);
+        }
+        return p.waitFor();
     }
 
     private static void cat(String path) {

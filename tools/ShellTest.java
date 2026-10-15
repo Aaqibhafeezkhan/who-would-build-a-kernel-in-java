@@ -9,6 +9,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Drives the real kernel's shell: boots it with the serial port on pipes and the QEMU monitor on
@@ -112,6 +114,26 @@ public class ShellTest {
                 Thread.sleep(500);
                 type(serial, "typed at duke\n");
             }, "you said: typed at duke");
+            long framesBefore = freeFrames(serial);
+            failures += check("ctrl-c stops a spinning program", () -> {
+                type(serial, "run /bin/spin\n");
+                Thread.sleep(500);
+                type(serial, "\u0003");
+            }, "^C\nduke> ");
+            long framesAfter = freeFrames(serial);
+            checks++;
+            if (framesAfter == framesBefore) {
+                System.out.println("ok   ctrl-c frees the program's memory");
+            } else {
+                System.out.println("FAIL ctrl-c frees the program's memory: " + framesBefore + " free frames before, " + framesAfter + " after");
+                failures++;
+            }
+            failures += check("ctrl-c stops a program waiting for input", () -> {
+                type(serial, "run /bin/echoline\n");
+                Thread.sleep(500);
+                type(serial, "\u0003");
+            }, "^C\nduke> ");
+            failures += check("the prompt is back after ctrl-c", () -> type(serial, "echo prompt is back\n"), "\nprompt is back");
             failures += check("ps/2 insert", () -> keys(monitor, "e c h o spc d u e left k ret"), "duke");
             failures += check("javascript command", () -> type(serial, "hello\n"),
                     "hello from JavaScript running in the Duke kernel");
@@ -247,6 +269,20 @@ public class ShellTest {
             Thread.sleep(50);
         }
         return false;
+    }
+
+    /** The free frame count from the shell's mem command. */
+    static long freeFrames(OutputStream serial) throws Exception {
+        int from = output.length();
+        type(serial, "mem\n");
+        if (!await(" free (", from)) {
+            throw new IllegalStateException("mem printed nothing");
+        }
+        Matcher m = Pattern.compile("frames: (\\d+) free").matcher(clean(output.substring(from)));
+        if (!m.find()) {
+            throw new IllegalStateException("no frame count in: " + clean(output.substring(from)));
+        }
+        return Long.parseLong(m.group(1));
     }
 
     static void type(OutputStream serial, String text) throws Exception {

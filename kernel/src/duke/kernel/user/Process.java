@@ -12,10 +12,14 @@ import java.util.List;
  * <p>A process that ends stays in the table as a zombie, holding only its exit status, until its
  * parent collects it with wait4 or the kernel code that started it calls {@link #waitFor}. Its
  * memory goes back as soon as it ends. Orphans, whose parent has ended, are dropped when they end.
+ *
+ * <p>A process the kernel starts leads a group that every process forked from it joins, as a
+ * shell's job would. {@link #kill} ends the whole group, as Ctrl-C does on Linux.
  */
 public final class Process {
 
-    // Linux's signal numbers, for the wait status of a process that faulted.
+    // Linux's signal numbers, for the wait status of a process that faulted or was killed.
+    public static final int SIGINT = 2;
     public static final int SIGILL = 4;
     public static final int SIGTRAP = 5;
     public static final int SIGBUS = 7;
@@ -45,6 +49,10 @@ public final class Process {
     public final int pid;
     public final String name;
     private Process parent;
+    /** The process the kernel started that this one was forked from, or this one. */
+    private final Process group;
+    /** Only the group leader's counts: set once, by kill. */
+    private volatile boolean killed;
     /** Collected by the kernel's waitFor rather than a parent's wait4. */
     private final boolean startedByKernel;
     // The image the thread runs next: replaced by execve, and freed when it's left behind.
@@ -60,12 +68,14 @@ public final class Process {
     private boolean ended;
     private long exitStatus;
     private UserMode.Fault fault;
+    private boolean interrupted;
     final FileTable files = new FileTable();
 
     private Process(String name, Process parent, AddressSpace space, long entry, long stack) {
         this.name = name;
         this.parent = parent;
         this.startedByKernel = parent == null;
+        this.group = parent == null ? this : parent.group;
         this.space = space;
         this.entry = entry;
         this.stack = stack;
@@ -94,6 +104,21 @@ public final class Process {
     /** The process the calling thread runs, or null for a kernel thread. */
     public static Process current() {
         return Thread.currentThread() instanceof Runner r ? r.process : null;
+    }
+
+    /** Whether the calling thread runs a process that's been killed. Allocates nothing. */
+    public static boolean killedHere() {
+        Process p = current();
+        return p != null && p.group.killed;
+    }
+
+    /**
+     * Ends this process and every process in its group: each leaves ring 3 at its next interrupt
+     * or system call, and a console read stops waiting. A wait4 needs no waking: the children it
+     * waits for are in the same group, and it wakes when they end.
+     */
+    public void kill() {
+        group.killed = true;
     }
 
     /** The parent's pid, or 0 when the kernel started it or the parent has ended. */
@@ -126,7 +151,7 @@ public final class Process {
         UserMode.Fault faulted = null;
         while (true) {
             try {
-                status = UserMode.run(space, entry, stack, registers, userState);
+                status = group.killed ? UserMode.KILLED : UserMode.run(space, entry, stack, registers, userState);
             } catch (UserMode.Fault f) {
                 faulted = f;
             }
@@ -143,7 +168,8 @@ public final class Process {
         }
         synchronized (LOCK) {
             ended = true;
-            exitStatus = status;
+            interrupted = status == UserMode.KILLED;
+            exitStatus = interrupted ? 0 : status;
             fault = faulted;
             for (int i = TABLE.size() - 1; i >= 0; i--) {
                 Process child = TABLE.get(i);
@@ -163,7 +189,7 @@ public final class Process {
 
     /**
      * Waits for this process, started by the kernel, to end, drops it from the table, and returns
-     * its exit status. Throws its {@link UserMode.Fault} if it faulted.
+     * its exit status, 0 if it was killed. Throws its {@link UserMode.Fault} if it faulted.
      */
     public long waitFor() throws InterruptedException {
         synchronized (LOCK) {
@@ -185,9 +211,9 @@ public final class Process {
         }
     }
 
-    /** Linux's wait status: the exit code in bits 8 to 15, or the signal a fault would raise in bits 0 to 6. */
+    /** Linux's wait status: the exit code in bits 8 to 15, or the signal that ended it in bits 0 to 6. */
     public int waitStatus() {
-        return fault != null ? signalFor(fault.vector) : (int) (exitStatus & 0xFF) << 8;
+        return fault != null ? signalFor(fault.vector) : interrupted ? SIGINT : (int) (exitStatus & 0xFF) << 8;
     }
 
     static int signalFor(int vector) {

@@ -67,7 +67,11 @@ final class OpenFile {
     private static long readConsole(long buffer, long count) {
         synchronized (CONSOLE) {
             if (pendingLine == null) {
-                String line = Shell.readLine() + "\n";
+                String typed = Shell.readLine();
+                if (typed == null) {
+                    return -SystemCalls.EINTR;
+                }
+                String line = typed + "\n";
                 pendingLine = new byte[line.length()];
                 for (int i = 0; i < line.length(); i++) {
                     pendingLine[i] = (byte) line.charAt(i);

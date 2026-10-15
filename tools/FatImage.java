@@ -59,6 +59,7 @@ public class FatImage {
         files.put("big.bin", big);
         files.put("bin/hello", helloElf());
         files.put("bin/crash", crashElf());
+        files.put("bin/spin", spinElf());
         files.put("bin/cat", catElf());
         files.put("bin/echoline", echoLineElf());
         return files;
@@ -166,6 +167,14 @@ public class FatImage {
         ByteBuffer elf = elfHeader(ELF_HEADERS + 1, 1);
         elf.put((byte) 0xF4);
         programHeader(elf, 0, 1, 5, 0, ELF_BASE, ELF_HEADERS + 1, ELF_HEADERS + 1);
+        return elf.array();
+    }
+
+    /** jmp to itself, forever: only Ctrl-C ends it. */
+    static byte[] spinElf() {
+        ByteBuffer elf = elfHeader(ELF_HEADERS + 2, 1);
+        elf.put((byte) 0xEB).put((byte) 0xFE);
+        programHeader(elf, 0, 1, 5, 0, ELF_BASE, ELF_HEADERS + 2, ELF_HEADERS + 2);
         return elf.array();
     }
 

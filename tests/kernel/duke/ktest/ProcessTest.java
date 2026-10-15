@@ -73,6 +73,45 @@ final class ProcessTest {
         assertEquals(Process.SIGSEGV, p.waitStatus(), "wait status: SIGSEGV, as Linux raises for #GP");
     }
 
+    static void testKillEndsASpinningProcess() throws InterruptedException {
+        int before = Process.count();
+        Process p = new Program().load(new Code().b(0xEB, 0xFE)).start(null);
+        Thread.sleep(50);
+        assertTrue(!p.ended(), "still spinning before the kill");
+        p.kill();
+        assertEquals(0, p.waitFor(), "waitFor");
+        assertEquals(Process.SIGINT, p.waitStatus(), "wait status: SIGINT");
+        assertEquals(before, Process.count(), "collected");
+    }
+
+    static void testKillEndsAReadFromTheConsole() throws InterruptedException {
+        Program p = new Program();
+        Process reader = p.load(new Code().call(SystemCalls.READ, 0, p.data, 64, p.data + 128).exit(0)).start(null);
+        Thread.sleep(50);
+        assertTrue(!reader.ended(), "still waiting for input before the kill");
+        reader.kill();
+        reader.waitFor();
+        assertEquals(Process.SIGINT, reader.waitStatus(), "wait status: SIGINT, not the exit after read returns");
+    }
+
+    // The parent waits in wait4 for a child spinning in ring 3. Killing the parent ends both.
+    static void testKillEndsTheWholeGroup() throws InterruptedException {
+        int before = Process.count();
+        Program p = new Program();
+        Code c = new Code().call(SystemCalls.FORK, 0, 0, 0, p.data);
+        c.b(0x48, 0x85, 0xC0).b(0x74, 0xFE);                                // test rax, rax; je $
+        Process parent = p.load(wait4(c, -1, 0, 0).exitWithResult()).start(null);
+        Thread.sleep(50);
+        assertEquals(before + 2, Process.count(), "parent and child running");
+        parent.kill();
+        parent.waitFor();
+        assertEquals(Process.SIGINT, parent.waitStatus(), "parent's wait status");
+        for (int i = 0; Process.count() != before; i++) {
+            assertTrue(i < 100, "the child ended too");
+            Thread.sleep(10);
+        }
+    }
+
     static void testWait4WithNoChildren() throws InterruptedException {
         Program p = new Program();
         p.load(wait4(new Code(), -1, 0, 0).exitWithResult());

@@ -143,6 +143,9 @@ public final class SystemCalls {
         }
         Frame.setRegister(frame, Frame.RAX, result);
         Magic.disableInterrupts();
+        if (Process.killedHere()) {
+            Magic.leaveUser(frame + FRAME_BYTES, UserMode.KILLED);
+        }
         Magic.setKernelStack(frame + FRAME_BYTES);
     }
 

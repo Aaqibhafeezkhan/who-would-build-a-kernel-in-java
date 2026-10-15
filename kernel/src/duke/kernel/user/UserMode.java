@@ -53,6 +53,8 @@ public final class UserMode {
     private static final long FAULTED = Long.MIN_VALUE;
     /** What run returns after execve: an exit status is always an int, so this can't be one. */
     public static final long EXECED = Long.MIN_VALUE + 1;
+    /** What run returns when the process was killed: it left ring 3 without exiting. */
+    public static final long KILLED = Long.MIN_VALUE + 2;
 
     // Per CPU: the fault handler records it on the CPU where run picks it up, without allocating.
     private static final long[] FAULT_VECTOR = new long[Smp.MAX_CPUS];
@@ -143,6 +145,10 @@ public final class UserMode {
      */
     public static void interrupted(long frame) {
         Magic.disableInterrupts();
+        // A process spinning in ring 3 makes no system calls, so the timer's interrupt is where it dies.
+        if (Process.killedHere()) {
+            Magic.leaveUser(frame + INTERRUPT_FRAME_BYTES, KILLED);
+        }
         Magic.setKernelStack(frame + INTERRUPT_FRAME_BYTES);
     }
 }
