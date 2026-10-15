@@ -26,7 +26,11 @@ public class ArrayDeque<E> extends AbstractCollection<E> implements Deque<E> {
         head = 0;
     }
 
+    // Null is rejected before anything is touched, so a failed add leaves the deque unchanged.
+    // pollFirst and peekFirst return null to mean "empty", so a stored null would be ambiguous.
+    // Every other adding method (offerFirst, offerLast, push, add, offer) ends up in addFirst or addLast.
     public void addFirst(E e) {
+        if (e == null) throw new NullPointerException();
         if (size == elements.length) grow();
         head = (head - 1 + elements.length) % elements.length;
         elements[head] = e;
@@ -34,11 +38,13 @@ public class ArrayDeque<E> extends AbstractCollection<E> implements Deque<E> {
     }
 
     public void addLast(E e) {
+        if (e == null) throw new NullPointerException();
         if (size == elements.length) grow();
         elements[(head + size) % elements.length] = e;
         size++;
     }
 
+    @SuppressWarnings("unchecked")
     public E removeFirst() {
         if (size == 0) throw new NoSuchElementException();
         E item = (E) elements[head];
@@ -48,6 +54,7 @@ public class ArrayDeque<E> extends AbstractCollection<E> implements Deque<E> {
         return item;
     }
 
+    @SuppressWarnings("unchecked")
     public E removeLast() {
         if (size == 0) throw new NoSuchElementException();
         int tail = (head + size - 1) % elements.length;
@@ -57,21 +64,25 @@ public class ArrayDeque<E> extends AbstractCollection<E> implements Deque<E> {
         return item;
     }
 
+    @SuppressWarnings("unchecked")
     public E peekFirst() {
         if (size == 0) return null;
         return (E) elements[head];
     }
 
+    @SuppressWarnings("unchecked")
     public E peekLast() {
         if (size == 0) return null;
         return (E) elements[(head + size - 1) % elements.length];
     }
 
+    @SuppressWarnings("unchecked")
     public E getFirst() {
         if (size == 0) throw new NoSuchElementException();
         return (E) elements[head];
     }
 
+    @SuppressWarnings("unchecked")
     public E getLast() {
         if (size == 0) throw new NoSuchElementException();
         return (E) elements[(head + size - 1) % elements.length];
@@ -98,6 +109,7 @@ public class ArrayDeque<E> extends AbstractCollection<E> implements Deque<E> {
                 return i < size;
             }
 
+            @SuppressWarnings("unchecked")
             public E next() {
                 if (i >= size) throw new NoSuchElementException();
                 return (E) elements[(head + i++) % elements.length];

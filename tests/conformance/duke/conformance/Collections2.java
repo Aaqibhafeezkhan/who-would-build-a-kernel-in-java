@@ -27,7 +27,7 @@ final class Collections2 {
         String removed = list.remove(1);
         boolean removedObject = list.remove("zzz");
         return list + " " + list.size() + " " + removed + " " + removedObject + " " + list.indexOf("D") + " "
-                + list.contains("c") + " " + list.get(0);
+            + list.contains("c") + " " + list.get(0);
     }
 
     static String listEqualityAndHash() {
@@ -124,7 +124,7 @@ final class Collections2 {
         Arrays.sort(chars);
         Arrays.sort(bytes);
         return Arrays.toString(ints) + Arrays.toString(longs) + Arrays.toString(chars) + Arrays.toString(bytes)
-                + Arrays.binarySearch(ints, 3) + Arrays.binarySearch(ints, 4);
+            + Arrays.binarySearch(ints, 3) + Arrays.binarySearch(ints, 4);
     }
 
     static String hashMapIterationOrderMatchesTheJdk() {
@@ -157,7 +157,7 @@ final class Collections2 {
         map.put("two", 2);
         map.put("three", 3);
         return map + " " + map.keySet() + " " + map.values() + " " + map.containsValue(2) + " " + map.get("four")
-                + " " + map.getOrDefault("four", 4);
+            + " " + map.getOrDefault("four", 4);
     }
 
     static String mapDefaultMethods() {
@@ -245,8 +245,8 @@ final class Collections2 {
         String[] names = {"x", "y"};
         String[] moreNames = Arrays.copyOf(names, 3);
         return Arrays.toString(grown) + " " + Arrays.toString(moreNames) + " " + moreNames.getClass().getSimpleName()
-                + " " + Arrays.equals(filled, new int[] {7, 7, 7, 7}) + " " + Arrays.hashCode(filled)
-                + " " + Arrays.toString(Arrays.copyOfRange(grown, 2, 5));
+            + " " + Arrays.equals(filled, new int[] {7, 7, 7, 7}) + " " + Arrays.hashCode(filled)
+            + " " + Arrays.toString(Arrays.copyOfRange(grown, 2, 5));
     }
 
     static String unmodifiableAndAsList() {
@@ -314,6 +314,40 @@ final class Collections2 {
             sb.append("nse2");
         }
         return sb.toString();
+    }
+
+    static String arrayDequeRejectsNull() {
+        String[] names = {"addFirst", "addLast", "offerFirst", "offerLast", "push", "add", "offer"};
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < names.length; i++) {
+            Deque<String> d = new ArrayDeque<>();
+            d.addLast("a");
+            d.addLast("b");
+            String before = d + " " + d.size();
+            String outcome;
+            try {
+                addNull(d, i);
+                outcome = "accepted";
+            } catch (NullPointerException e) {
+                outcome = "NullPointerException";
+            }
+            String after = d + " " + d.size();
+            sb.append(names[i]).append(' ').append(outcome).append(' ')
+                .append(before.equals(after) ? "unchanged" : "changed:" + after).append(';');
+        }
+        return sb.toString();
+    }
+
+    private static void addNull(Deque<String> d, int which) {
+        switch (which) {
+            case 0: d.addFirst(null); break;
+            case 1: d.addLast(null); break;
+            case 2: d.offerFirst(null); break;
+            case 3: d.offerLast(null); break;
+            case 4: d.push(null); break;
+            case 5: d.add(null); break;
+            default: d.offer(null); break;
+        }
     }
 
     static String selfReferenceToString() {
