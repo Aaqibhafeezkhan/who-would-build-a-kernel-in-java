@@ -133,6 +133,13 @@ public class ShellTest {
                 Thread.sleep(500);
                 type(serial, "\u0003");
             }, "^C\nduke> ");
+            failures += check("ctrl-c discards a partial command", () -> {
+                int from = output.length();
+                type(serial, "echo abc\u0003echo def\n");
+                if (!await("\ndef\n", from)) {
+                    throw new AssertionError("the command after Ctrl-C did not execute");
+                }
+            }, "^C");
             failures += check("the prompt is back after ctrl-c", () -> type(serial, "echo prompt is back\n"), "\nprompt is back");
             failures += check("ps/2 insert", () -> keys(monitor, "e c h o spc d u e left k ret"), "duke");
             failures += check("javascript command", () -> type(serial, "hello\n"),

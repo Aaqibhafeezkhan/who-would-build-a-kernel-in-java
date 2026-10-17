@@ -49,6 +49,10 @@ public final class Shell {
                 Console.println("");
                 return line.toString();
             }
+            if (c == Input.CTRL_C) {
+                Console.println("^C");
+                return "";
+            }
 
             switch (c) {
                 case Input.KEY_LEFT -> {
