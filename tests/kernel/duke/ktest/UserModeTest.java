@@ -279,6 +279,34 @@ final class UserModeTest {
         }
     }
 
+    static void testGetcwdWritesRootAndNul() {
+        Program p = new Program();
+        int offset = 64;
+        p.load(new Code()
+                .movEax(SystemCalls.GETCWD)
+                .movEdi((int) (p.data + offset))
+                .movRsi(2)
+                .syscall()
+                .exitWithResult());
+
+        try {
+            assertEquals(2, p.run(), "getcwd bytes written");
+            assertEquals('/', Magic.peekByte(p.kernelView(offset)) & 0xFF, "getcwd root");
+            assertEquals(0, Magic.peekByte(p.kernelView(offset + 1)) & 0xFF, "getcwd terminator");
+        } finally {
+            p.free();
+        }
+
+        assertEquals(-SystemCalls.ERANGE,
+                run(new Code().movEax(SystemCalls.GETCWD).movEdi((int) (BASE + 64)).movRsi(1)
+                        .syscall().exitWithResult()),
+                "getcwd with a size of one");
+        assertEquals(-SystemCalls.EFAULT,
+                run(new Code().movEax(SystemCalls.GETCWD).movEdi((int) (BASE + 64)).movRsi(2)
+                        .syscall().exitWithResult()),
+                "getcwd with a read-only buffer");
+    }
+
     static void testUnameRejectsReadOnlyBuffer() {
         Code code = new Code()
                 .movEax(SystemCalls.UNAME)
