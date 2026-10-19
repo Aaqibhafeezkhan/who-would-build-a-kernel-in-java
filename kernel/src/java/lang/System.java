@@ -1,10 +1,13 @@
 package java.lang;
 
 import duke.rt.Heap;
+import java.io.PrintStream;
 import duke.rt.Magic;
 import duke.rt.Tib;
 
 public final class System {
+
+    public static final PrintStream out = new PrintStream();
 
     private System() {
     }

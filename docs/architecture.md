@@ -288,6 +288,17 @@ one. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too
 the host, put on a FAT disk, and run one after another through the shell in a single boot, with
 the output compared to node's.
 
+Java programs run in ring 3 too. `dukec --user` builds one into a static executable linked at
+0x400000 that runs unchanged on Linux and on Duke. Its `_start` points GS at the CPU block with
+`arch_prctl(ARCH_SET_GS)` instead of writing the MSR, switches to a stack in its own bss, and calls
+`exit_group(0)` once `main` returns. The program's `java.base` is the kernel's `java.*` and
+`duke.rt`, with the five `duke.kernel` classes they call (`Console`, `Panic`, `Scheduler`,
+`Monitors`, `Smp`) swapped for single-threaded versions in `user/src` that talk to the kernel
+through `Magic.syscall`. Nothing in the runtime knows which one it got. A user program has one
+thread for now, and its heap is the 4 MiB arena: nothing grows it or collects it yet.
+`make user-test` runs each program in `tests/user` on HotSpot, on Linux and on Duke and compares
+the three.
+
 `Elf.load` turns a static x86-64 executable into a fresh `AddressSpace`: each `PT_LOAD` segment
 copied into zeroed frames (so bss is free), writable only with `PF_W` and NX without `PF_X`, and
 pages two segments share get both permissions. It refuses dynamic and position-independent

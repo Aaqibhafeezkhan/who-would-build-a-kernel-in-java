@@ -73,6 +73,9 @@ jobs:
       - name: Shell over serial and PS/2
         run: make shell-test
 
+      - name: Java programs in ring 3 (HotSpot vs Linux and Duke)
+        run: make user-test
+
       - name: Upload kernel and logs
         if: always()
         uses: actions/upload-artifact@v7
@@ -88,6 +91,7 @@ jobs:
             build/conformance/boot.txt
             build/panics/*/serial.log
             build/ktest/serial.log
+            build/user-tests/duke/serial.log
             build/js-tests/duke/serial.log
             compiler/build/reports/tests/
             compiler/build/test-results/test/*.xml

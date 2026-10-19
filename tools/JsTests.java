@@ -1,4 +1,5 @@
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -76,13 +77,18 @@ public class JsTests {
 
     /** Compares one run with node's, printing the verdict; returns the number of failures (0 or 1). */
     static int check(String label, Result expected, Run run) throws Exception {
+        return check(label, "node", "jsc", expected, run);
+    }
+
+    /** {@link #check} against {@code reference}'s output, with the run's own lines labelled {@code subject}. */
+    static int check(String label, String reference, String subject, Result expected, Run run) throws Exception {
         Result actual = run.run();
         if (expected.output().equals(actual.output()) && expected.exit() == actual.exit()) {
             System.out.println("PASS " + label);
             return 0;
         }
-        System.out.println("FAIL " + label + " (exit " + actual.exit() + ", node " + expected.exit() + ")");
-        System.out.println(firstDifference(expected.output(), actual.output()));
+        System.out.println("FAIL " + label + " (exit " + actual.exit() + ", " + reference + " " + expected.exit() + ")");
+        System.out.println(firstDifference(reference, subject, expected.output(), actual.output()));
         return 1;
     }
 
@@ -124,11 +130,7 @@ public class JsTests {
             }
             """;
 
-    /**
-     * The x86 executables, all on one FAT disk, each run by the shell's {@code run} in one boot of
-     * the kernel. What the shell prints between the command and its next prompt is the program's
-     * output, less the "exit status" line it adds for a nonzero exit.
-     */
+    /** The x86 executables, run on Duke by {@link #runAllOnDuke}. */
     static Map<String, Result> runOnDuke(List<Path> programs, List<String> wanted) throws Exception {
         Path dir = OUT.resolve("duke");
         Files.createDirectories(dir);
@@ -144,10 +146,24 @@ public class JsTests {
             if (compiled.exit() != 0) {
                 results.put(name, compiled);
             } else {
-                files.put("js/" + name, Files.readAllBytes(exe));
+                files.put(name, Files.readAllBytes(exe));
             }
         }
-        Path image = dir.resolve("js.img");
+        results.putAll(runAllOnDuke(dir, "js", files));
+        return results;
+    }
+
+    /**
+     * Executables, all on one FAT disk under {@code /folder}, each run by the shell's {@code run}
+     * in one boot of the kernel. What the shell prints between the command and its next prompt is
+     * the program's output, less the "exit status" line it adds for a nonzero exit. Leaves the
+     * serial log in {@code dir}.
+     */
+    static Map<String, Result> runAllOnDuke(Path dir, String folder, Map<String, byte[]> programs) throws Exception {
+        Map<String, byte[]> files = new LinkedHashMap<>();
+        programs.forEach((name, bytes) -> files.put(folder + "/" + name, bytes));
+        Map<String, Result> results = new LinkedHashMap<>();
+        Path image = dir.resolve(folder + ".img");
         FatImage.write(image, files, List.of());
         Process qemu = new ProcessBuilder("tools/qemu.sh", ShellTest.ESP.toString(), "-serial", "stdio",
                 "-drive", "if=none,id=js,format=raw,snapshot=on,file=" + image, "-device", "virtio-blk-pci,drive=js")
@@ -167,7 +183,7 @@ public class JsTests {
                 int from = ShellTest.output.length();
                 ShellTest.type(qemu.getOutputStream(), "run " + path + "\n");
                 if (!awaitPrompt(from)) {
-                    results.put(name.substring(3), new Result("timed out:\n" + ShellTest.clean(ShellTest.output.substring(from)), -1));
+                    results.put(name.substring(folder.length() + 1), new Result("timed out:\n" + ShellTest.clean(ShellTest.output.substring(from)), -1));
                     break;
                 }
                 // The shell echoes each key with a cursor redraw, so skip the whole command line.
@@ -181,7 +197,9 @@ public class JsTests {
                     exit = Integer.parseInt(out.substring(at + status.length(), out.length() - 1));
                     out = out.substring(0, at);
                 }
-                results.put(name.substring(3), new Result(out, exit));
+                // The serial log is read a byte per char; programs print UTF-8, as the references' output is read.
+                out = new String(out.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+                results.put(name.substring(folder.length() + 1), new Result(out, exit));
             }
         } finally {
             qemu.destroy();
@@ -236,7 +254,7 @@ public class JsTests {
         if (native64) {
             return List.of(exe.toString());
         }
-        return List.of("docker", "run", "-q", "--rm", "--platform", "linux/amd64", "-v", OUT + ":/t", "alpine",
+        return List.of("docker", "run", "-q", "--rm", "--platform", "linux/amd64", "-v", exe.getParent() + ":/t", "alpine",
                 "/t/" + exe.getFileName());
     }
 
@@ -250,7 +268,8 @@ public class JsTests {
         return new Result(new String(bytes), p.exitValue());
     }
 
-    static String firstDifference(String expected, String actual) {
+    static String firstDifference(String reference, String subject, String expected, String actual) {
+        int width = Math.max(reference.length(), subject.length()) + 1;
         String[] e = expected.split("\n", -1);
         String[] a = actual.split("\n", -1);
         List<String> lines = new ArrayList<>();
@@ -258,7 +277,8 @@ public class JsTests {
             String want = i < e.length ? e[i] : "<missing>";
             String got = i < a.length ? a[i] : "<missing>";
             if (!want.equals(got)) {
-                lines.add("  line " + (i + 1) + "\n    node: " + want + "\n    jsc:  " + got);
+                lines.add("  line " + (i + 1) + "\n    " + reference + ":" + " ".repeat(width - reference.length()) + want
+                        + "\n    " + subject + ":" + " ".repeat(width - subject.length()) + got);
                 if (lines.size() == 3) {
                     break;
                 }

@@ -33,6 +33,8 @@ public final class Compiler {
 
     public static final String ENTRY_SYMBOL = "_start";
     public static final long KERNEL_BASE = 0xffff_ffff_8000_0000L;
+    /** Where a user program links: Linux's traditional ET_EXEC base, and what Duke's loader expects. */
+    public static final long USER_BASE = 0x400000;
 
     static final String STRING_CLASS = "java/lang/String";
     static final String CLASS_CLASS = "java/lang/Class";
@@ -97,6 +99,11 @@ public final class Compiler {
     static final int HEAP_ARENA_SIZE = 4 * 1024 * 1024;
 
     private static final int BOOT_STACK_SIZE = 64 * 1024;
+    /** A user program runs on a stack in its own image rather than the one exec gave it, like the kernel. */
+    private static final int USER_STACK_SIZE = 1024 * 1024;
+    private static final int SYS_ARCH_PRCTL = 158;
+    private static final int SYS_EXIT_GROUP = 231;
+    private static final int ARCH_SET_GS = 0x1001;
 
     private final ClassPool pool;
     private final Layouts layouts;
@@ -147,6 +154,9 @@ public final class Compiler {
     private final List<String> includes = new ArrayList<>();
     private final List<String> bootInitializers = new ArrayList<>();
 
+    /** A static Linux executable for ring 3 rather than a kernel: no Limine, no privileged boot code. */
+    private boolean user;
+
     public Compiler(ClassPool pool) {
         this.pool = pool;
         this.layouts = new Layouts(pool);
@@ -186,6 +196,10 @@ public final class Compiler {
         return found;
     }
 
+    public void userMode() {
+        user = true;
+    }
+
     public Image compile(String entryClass, String entryMethod) {
         ClassPool.ResolvedMethod main = pool.resolveMethod(entryClass, entryMethod, "()V");
         if (!main.is(AccessFlag.STATIC)) {
@@ -194,10 +208,12 @@ public final class Compiler {
         // Every TIB is a Class object carrying its name as a String, so these are always in the image.
         requireClass(CLASS_CLASS);
         requireClass(STRING_CLASS);
-        requireClass(LIMINE);
-        if (buildTimeStatics(LIMINE) == null) {
-            throw new CompileException(LIMINE + "'s static initializer must be constant-only: Limine reads the"
-                    + " requests from the image before any code runs");
+        if (!user) {
+            requireClass(LIMINE);
+            if (buildTimeStatics(LIMINE) == null) {
+                throw new CompileException(LIMINE + "'s static initializer must be constant-only: Limine reads the"
+                        + " requests from the image before any code runs");
+            }
         }
         tibs.add(BYTE_ARRAY);
         requireClass(entryClass);
@@ -235,13 +251,20 @@ public final class Compiler {
         if (apEntry) {
             emitApEntry();
         }
-        emitBootStub(entryClass, mainSymbol);
+        if (user) {
+            emitUserStartStub(entryClass, mainSymbol);
+        } else {
+            emitBootStub(entryClass, mainSymbol);
+        }
         emitMethodTable();
         emitStatics();
         emitTibs();
         emitStrings();
         emitHeapArena();
-        emitImageLayout();
+        // Only the kernel maps its own image.
+        if (!user) {
+            emitImageLayout();
+        }
         return image;
     }
 
@@ -1204,6 +1227,53 @@ public final class Compiler {
         } else {
             section.emitReloc(Reloc.Kind.ABS64, symbol, 0);
         }
+    }
+
+    /**
+     * _start for a user program: the same steps as the kernel's boot stub, with arch_prctl in place
+     * of the GS MSR, and exit_group(0) once main returns. Linux and Duke both start it with nothing
+     * but rsp set.
+     */
+    private void emitUserStartStub(String entryClass, String mainSymbol) {
+        image.bss.align(16);
+        int stackOffset = image.bss.size();
+        image.bss.reserve(USER_STACK_SIZE);
+        image.define("boot.stack", image.bss, stackOffset, USER_STACK_SIZE, Image.SymbolType.OBJECT);
+
+        image.bss.align(CPU_BLOCK_SIZE);
+        int cpuBlock = image.bss.size();
+        image.bss.reserve(CPU_BLOCK_SIZE);
+        image.define(BSP_CPU_BLOCK, image.bss, cpuBlock, CPU_BLOCK_SIZE, Image.SymbolType.OBJECT);
+
+        Section text = image.text;
+        text.align(16);
+        int start = text.size();
+        X64 a = new X64(text);
+        a.lea(Reg.RSP, Mem.rip("boot.stack", USER_STACK_SIZE));
+        a.alu(X64.Alu.XOR, false, Reg.RBP, Reg.RBP);
+        a.movImm32(Reg.RAX, SYS_ARCH_PRCTL);
+        a.movImm32(Reg.RDI, ARCH_SET_GS);
+        a.lea(Reg.RSI, Mem.rip(BSP_CPU_BLOCK));
+        a.syscall();
+        a.lea(Reg.RAX, Mem.rip(BSP_CPU_BLOCK));
+        a.store(8, CPU_SELF, Reg.RAX);
+        if (stackOverflowStub) {
+            a.lea(Reg.RAX, Mem.rip("boot.stack", 0));
+            a.store(8, STACK_BASE, Reg.RAX);
+            a.lea(Reg.RAX, Mem.rip("boot.stack", STACK_RESERVE));
+            a.store(8, STACK_LIMIT, Reg.RAX);
+        }
+        if (initializers.contains(entryClass)) {
+            a.call(initializerSymbol(entryClass));
+        }
+        for (String type : bootInitializers) {
+            a.call(initializerSymbol(type));
+        }
+        a.call(mainSymbol);
+        a.movImm32(Reg.RAX, SYS_EXIT_GROUP);
+        a.alu(X64.Alu.XOR, false, Reg.RDI, Reg.RDI);
+        a.syscall();
+        image.define(ENTRY_SYMBOL, text, start, text.size() - start, Image.SymbolType.FUNC);
     }
 
     /** Switches to our own stack, initializes the entry class, then calls the entry point. */

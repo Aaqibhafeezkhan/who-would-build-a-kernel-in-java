@@ -10,10 +10,11 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * {@code dukec --classes DIR --entry pkg/Class.method --output kernel.elf [--map kernel.map] [--include pkg/Class|pkg/]...}
+ * {@code dukec --classes DIR --entry pkg/Class.method --output kernel.elf [--map kernel.map] [--include pkg/Class|pkg/]... [--user]}
  *
  * <p>{@code --include} adds classes (or whole packages, with a trailing slash) that are compiled in and
  * initialized at boot though nothing refers to them. {@link Compiler#DEFAULT_INCLUDES} are always on.
+ * {@code --user} builds a static Linux executable for ring 3 instead of a kernel.
  */
 public final class Main {
 
@@ -26,6 +27,7 @@ public final class Main {
         Path output = null;
         Path map = null;
         List<String> includes = new ArrayList<>(Compiler.DEFAULT_INCLUDES);
+        boolean user = false;
         for (int i = 0; i < args.length; i++) {
             String value = i + 1 < args.length ? args[i + 1] : null;
             switch (args[i]) {
@@ -34,6 +36,10 @@ public final class Main {
                 case "--output" -> output = Path.of(require(value, args[i]));
                 case "--map" -> map = Path.of(require(value, args[i]));
                 case "--include" -> includes.add(require(value, args[i]));
+                case "--user" -> {
+                    user = true;
+                    continue;
+                }
                 default -> usage("unknown argument " + args[i]);
             }
             i++;
@@ -49,15 +55,21 @@ public final class Main {
         Image.Linked linked;
         try {
             Compiler compiler = new Compiler(ClassPool.load(classes));
+            if (user) {
+                compiler.userMode();
+            }
             includes.forEach(compiler::include);
             Image image = compiler.compile(entry.substring(0, dot), entry.substring(dot + 1));
-            linked = image.link(Compiler.KERNEL_BASE);
+            linked = image.link(user ? Compiler.USER_BASE : Compiler.KERNEL_BASE);
         } catch (CompileException e) {
             System.err.println("dukec: error: " + e.getMessage());
             System.exit(1);
             return;
         }
         Files.write(output, ElfWriter.write(linked, linked.address(Compiler.ENTRY_SYMBOL)));
+        if (user && !output.toFile().setExecutable(true)) {
+            System.err.println("dukec: warning: could not mark " + output + " executable");
+        }
         if (map != null) {
             Files.write(map, mapLines(linked));
         }

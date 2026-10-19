@@ -1044,6 +1044,14 @@ final class MethodCompiler {
                 a.store(4, Mem.at(RSI, 12), RDX);
             }
             case "breakpoint" -> a.int3();
+            case "syscall" -> {
+                popLong(RDX);
+                popLong(RSI);
+                popLong(Reg.RDI);
+                popLong(RAX);
+                a.syscall();
+                pushLong(RAX);
+            }
             case "resetStackLimit" -> {
                 a.load(8, false, RAX, Compiler.STACK_BASE);
                 a.lea(RAX, Mem.at(RAX, Compiler.STACK_RESERVE));

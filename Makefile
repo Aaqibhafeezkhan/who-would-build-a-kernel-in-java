@@ -23,7 +23,7 @@ JS_SRCS       := $(wildcard kernel/js/*.js)
 KERNEL_JAVAC  := javac --system none -XDstringConcat=inline
 COMPILER_SRCS := $(shell find compiler/src/main -name '*.java') compiler/build.gradle.kts
 
-.PHONY: all compiler run test unit-test boot-test conformance conformance-gc panic-tests ktest shell-test js-test disasm clean
+.PHONY: all compiler run test unit-test boot-test conformance conformance-gc panic-tests ktest shell-test js-test user-test disasm clean
 
 all: $(BUILD)/esp/boot/kernel.elf
 
@@ -59,7 +59,7 @@ $(BUILD)/esp/boot/kernel.elf: $(BUILD)/kernel.elf $(BUILD)/limine/BOOTX64.EFI bo
 run: all
 	tools/qemu.sh $(BUILD)/esp -serial mon:stdio
 
-test: unit-test js-test boot-test conformance panic-tests ktest shell-test
+test: unit-test js-test boot-test conformance panic-tests ktest shell-test user-test
 
 unit-test:
 	./gradlew -q :compiler:test
@@ -89,6 +89,11 @@ shell-test: all
 # needs Docker unless this is x86-64 Linux; JS_BACKENDS=java,duke skips it.
 js-test: $(DUKEC) all
 	java tools/JsTests.java
+
+# Java programs built with dukec --user, against HotSpot, on Linux and Duke. The Linux run needs
+# Docker unless this is x86-64 Linux; USER_BACKENDS=duke skips it.
+user-test: $(DUKEC) all
+	java tools/UserJavaTests.java
 
 disasm: $(BUILD)/kernel.elf
 	objdump -d -M intel $(BUILD)/kernel.elf | less

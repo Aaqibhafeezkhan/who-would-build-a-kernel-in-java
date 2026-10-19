@@ -3,6 +3,7 @@
  * platform the kernel can use.
  */
 module java.base {
+    exports java.io;
     exports java.lang;
     exports java.lang.annotation;
     exports java.lang.invoke;
