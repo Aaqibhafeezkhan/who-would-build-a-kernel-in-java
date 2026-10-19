@@ -1045,6 +1045,9 @@ final class MethodCompiler {
             }
             case "breakpoint" -> a.int3();
             case "syscall" -> {
+                popLong(Reg.R9);
+                popLong(Reg.R8);
+                popLong(Reg.R10);
                 popLong(RDX);
                 popLong(RSI);
                 popLong(Reg.RDI);

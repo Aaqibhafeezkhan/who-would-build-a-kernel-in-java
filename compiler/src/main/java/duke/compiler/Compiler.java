@@ -47,6 +47,8 @@ public final class Compiler {
     static final String INTERRUPT_STUBS = "interrupt.stubs";
     static final String SYSTEM_CALLS = "duke/kernel/user/SystemCalls";
     static final String SYSCALL_ENTRY = "syscall.entry";
+    /** A user program's runtime setup, run by _start before any class initializer: user/src's. */
+    static final String USER_RUNTIME = "duke/kernel/UserRuntime";
     /** Vectors where the CPU pushes an error code; every other stub pushes a 0 in its place. */
     private static final int DOUBLE_FAULT = 8;
     private static final Set<Integer> ERROR_CODE_VECTORS = Set.of(8, 10, 11, 12, 13, 14, 17, 21, 29, 30);
@@ -156,6 +158,7 @@ public final class Compiler {
 
     /** A static Linux executable for ring 3 rather than a kernel: no Limine, no privileged boot code. */
     private boolean user;
+    private String userRuntimeInit;
 
     public Compiler(ClassPool pool) {
         this.pool = pool;
@@ -228,6 +231,10 @@ public final class Compiler {
             }
         }
         String mainSymbol = requireMethod(main);
+        if (user) {
+            requireClass(USER_RUNTIME);
+            userRuntimeInit = requireMethod(USER_RUNTIME, "init", "()V");
+        }
 
         do {
             while (!worklist.isEmpty()) {
@@ -1263,6 +1270,7 @@ public final class Compiler {
             a.lea(Reg.RAX, Mem.rip("boot.stack", STACK_RESERVE));
             a.store(8, STACK_LIMIT, Reg.RAX);
         }
+        a.call(userRuntimeInit);
         if (initializers.contains(entryClass)) {
             a.call(initializerSymbol(entryClass));
         }

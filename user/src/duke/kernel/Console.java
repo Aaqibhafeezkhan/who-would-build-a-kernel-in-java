@@ -50,7 +50,7 @@ public final class Console {
         }
         long data = Magic.addressOf(bytes) + Tib.ARRAY_DATA;
         for (int done = 0; done < n; ) {
-            long written = Magic.syscall(WRITE, fd, data + done, n - done);
+            long written = Magic.syscall(WRITE, fd, data + done, n - done, 0, 0, 0);
             if (written <= 0) {
                 return;
             }

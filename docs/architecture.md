@@ -295,7 +295,11 @@ Java programs run in ring 3 too. `dukec --user` builds one into a static executa
 `duke.rt`, with the five `duke.kernel` classes they call (`Console`, `Panic`, `Scheduler`,
 `Monitors`, `Smp`) swapped for single-threaded versions in `user/src` that talk to the kernel
 through `Magic.syscall`. Nothing in the runtime knows which one it got. A user program has one
-thread for now, and its heap is the 4 MiB arena: nothing grows it or collects it yet.
+thread for now. Before any class initializer, `_start` calls `UserRuntime.init`, which `mmap`s
+1 GiB for the heap plus its mark bits and mark stack, and hands them to `Heap.growInto` as the
+kernel's `KernelHeap` does with page tables. Both Linux and Duke fill those pages in as they're
+first touched, so the backing's commit has nothing to do, and the collector runs exactly as in
+the kernel, with no other threads to stop.
 `make user-test` runs each program in `tests/user` on HotSpot, on Linux and on Duke and compares
 the three.
 

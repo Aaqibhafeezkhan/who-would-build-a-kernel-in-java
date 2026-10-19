@@ -41,7 +41,7 @@ public final class Panic {
 
     public static void haltForever() {
         while (true) {
-            Magic.syscall(EXIT_GROUP, 1, 0, 0);
+            Magic.syscall(EXIT_GROUP, 1, 0, 0, 0, 0, 0);
         }
     }
 }

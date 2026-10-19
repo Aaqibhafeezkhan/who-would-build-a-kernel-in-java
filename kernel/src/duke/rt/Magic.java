@@ -210,7 +210,7 @@ public final class Magic {
     public static native void breakpoint();
 
     /** A Linux system call from ring 3: the result, or a negated errno. */
-    public static native long syscall(long number, long a0, long a1, long a2);
+    public static native long syscall(long number, long a0, long a1, long a2, long a3, long a4, long a5);
 
     public static native void halt();
 
