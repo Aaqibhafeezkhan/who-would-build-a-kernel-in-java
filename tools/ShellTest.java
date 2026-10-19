@@ -133,6 +133,9 @@ public class ShellTest {
                 Thread.sleep(500);
                 type(serial, "\u0003");
             }, "^C\nduke> ");
+            failures += checkAbsent("ctrl-c discards a partial command",
+                    () -> type(serial, "echo abc\u0003"), "^C", "\nabc\n");
+            failures += check("command after ctrl-c executes", () -> type(serial, "echo def\n"), "\ndef\n");
             failures += check("the prompt is back after ctrl-c", () -> type(serial, "echo prompt is back\n"), "\nprompt is back");
             failures += check("ps/2 insert", () -> keys(monitor, "e c h o spc d u e left k ret"), "duke");
             failures += check("javascript command", () -> type(serial, "hello\n"),
@@ -258,6 +261,24 @@ public class ShellTest {
         }
         System.out.println("FAIL " + name + ": no \"" + expected + "\" in:\n" + clean(output.substring(from)).indent(4));
         return 1;
+    }
+
+    /** Runs an action and verifies expected output appears without a forbidden output fragment. */
+    static int checkAbsent(String name, Action action, String expected, String forbidden) throws Exception {
+        checks++;
+        int from = output.length();
+        action.run();
+        if (!await(expected, from)) {
+            System.out.println("FAIL " + name + ": no \"" + expected + "\" in:\n" + clean(output.substring(from)).indent(4));
+            return 1;
+        }
+        String actual = clean(output.substring(from));
+        if (actual.contains(forbidden)) {
+            System.out.println("FAIL " + name + ": unexpected \"" + forbidden + "\" in:\n" + actual.indent(4));
+            return 1;
+        }
+        System.out.println("ok   " + name);
+        return 0;
     }
 
     static boolean await(String text, int from) throws InterruptedException {
