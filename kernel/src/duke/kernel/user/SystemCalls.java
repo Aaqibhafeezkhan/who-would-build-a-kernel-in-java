@@ -30,6 +30,7 @@ public final class SystemCalls {
     public static final int EXECVE = 59;
     public static final int WAIT4 = 61;
     public static final int UNAME = 63;
+    public static final int GETCWD = 79;
     public static final int GETPPID = 110;
     public static final int ARCH_PRCTL = 158;
     public static final int EXIT = 60;
@@ -55,6 +56,7 @@ public final class SystemCalls {
     public static final int ESPIPE = 29;
     public static final int EROFS = 30;
     public static final int ENAMETOOLONG = 36;
+    public static final int ERANGE = 34;
     public static final int ENOSYS = 38;
 
     public static final int PROT_READ = 1;
@@ -130,6 +132,8 @@ public final class SystemCalls {
                     Frame.register(frame, Frame.R10));
         } else if (number == UNAME) {
             result = uname(a0);
+        } else if (number == GETCWD) {
+            result = getcwd(a0, a1);
         } else if (number == FORK) {
             result = fork(frame);
         } else if (number == EXECVE) {
@@ -455,6 +459,18 @@ public final class SystemCalls {
         }
         return true;
     }
+    private static long getcwd(long buffer, long size) {
+        if (size < 2) {
+            return -ERANGE;
+        }
+        if (!userWritable(buffer, 2)) {
+            return -EFAULT;
+        }
+        Magic.pokeByte(buffer, (byte) '/');
+        Magic.pokeByte(buffer + 1, (byte) 0);
+        return 2;
+    }
+
     private static final int UTSNAME_FIELD_BYTES = 65;
     private static final int UTSNAME_BYTES = 6 * UTSNAME_FIELD_BYTES;
 
