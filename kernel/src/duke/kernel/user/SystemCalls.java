@@ -23,6 +23,8 @@ public final class SystemCalls {
     public static final int FSTAT = 5;
     public static final int LSEEK = 8;
     public static final int MMAP = 9;
+    public static final int DUP = 32;
+    public static final int DUP2 = 33;
     public static final int GETPID = 39;
     public static final int FORK = 57;
     public static final int EXECVE = 59;
@@ -106,6 +108,10 @@ public final class SystemCalls {
             result = open((int) a0, a1, a2);
         } else if (number == CLOSE) {
             result = files().close(a0) ? 0 : -EBADF;
+        } else if (number == DUP) {
+            result = files().dup(a0);
+        } else if (number == DUP2) {
+            result = files().dup2(a0, a1);
         } else if (number == FSTAT) {
             result = fstat(a0, a1);
         } else if (number == LSEEK) {

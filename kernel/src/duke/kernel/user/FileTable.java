@@ -52,4 +52,18 @@ final class FileTable {
         files[(int) fd] = null;
         return true;
     }
+
+    synchronized int dup(long oldfd) {
+        OpenFile file = get(oldfd);
+        return file == null ? -SystemCalls.EBADF : add(file);
+    }
+
+    synchronized int dup2(long oldfd, long newfd) {
+        OpenFile file = get(oldfd);
+        if (file == null || newfd < 0 || newfd >= MAX_FILES) {
+            return -SystemCalls.EBADF;
+        }
+        files[(int) newfd] = file;
+        return (int) newfd;
+    }
 }

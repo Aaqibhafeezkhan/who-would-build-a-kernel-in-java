@@ -159,4 +159,48 @@ final class FileTest {
         assertEquals(3, a.result(0), "a's open");
         assertEquals(-SystemCalls.EBADF, b.result(read), "b's fd 3");
     }
+
+    static void testDupAndDup2() throws InterruptedException {
+        FileTest t = new FileTest();
+        long hello = t.string("/hello.txt");
+        long buffer = t.p.data + BUFFER;
+        int open = t.call(SystemCalls.OPEN, hello, 0, 0);
+        int dup = t.call(SystemCalls.DUP, 3, 0, 0);
+        int read3 = t.call(SystemCalls.READ, 3, buffer, 6);
+        int read4 = t.call(SystemCalls.READ, 4, buffer + 10, 4);
+        int pos3 = t.call(SystemCalls.LSEEK, 3, 0, 1);
+        int same = t.call(SystemCalls.DUP2, 3, 3, 0);
+        int onto1 = t.call(SystemCalls.DUP2, 4, 1, 0);
+        int close3 = t.call(SystemCalls.CLOSE, 3, 0, 0);
+        int close4 = t.call(SystemCalls.CLOSE, 4, 0, 0);
+        int read1 = t.call(SystemCalls.READ, 1, buffer + 20, 7);
+        int dupClosed = t.call(SystemCalls.DUP, 3, 0, 0);
+        int dupNeg = t.call(SystemCalls.DUP, -1, 0, 0);
+        int dupHigh = t.call(SystemCalls.DUP, 99, 0, 0);
+        int dup2Closed = t.call(SystemCalls.DUP2, 3, 5, 0);
+        int dup2SameClosed = t.call(SystemCalls.DUP2, 3, 3, 0);
+        int dup2NegNew = t.call(SystemCalls.DUP2, 1, -1, 0);
+        int dup2HighNew = t.call(SystemCalls.DUP2, 1, 64, 0);
+        t.run();
+        assertEquals(3, t.result(open), "open");
+        assertEquals(4, t.result(dup), "dup picks the next free descriptor");
+        assertEquals(6, t.result(read3), "read through 3");
+        assertEquals("hello ", t.buffer(0, 6), "first bytes");
+        assertEquals(4, t.result(read4), "read through 4");
+        assertEquals("from", t.buffer(10, 4), "continues where 3 left off");
+        assertEquals(10, t.result(pos3), "3's position moved with 4's read");
+        assertEquals(3, t.result(same), "dup2 onto itself");
+        assertEquals(1, t.result(onto1), "dup2 onto 1");
+        assertEquals(0, t.result(close3), "close 3");
+        assertEquals(0, t.result(close4), "close 4");
+        assertEquals(7, t.result(read1), "still open on 1 after closing the originals");
+        assertEquals(" FAT32\n", t.buffer(20, 7), "rest of the file through 1");
+        assertEquals(-SystemCalls.EBADF, t.result(dupClosed), "dup closed fd");
+        assertEquals(-SystemCalls.EBADF, t.result(dupNeg), "dup negative fd");
+        assertEquals(-SystemCalls.EBADF, t.result(dupHigh), "dup out-of-range fd");
+        assertEquals(-SystemCalls.EBADF, t.result(dup2Closed), "dup2 closed oldfd");
+        assertEquals(-SystemCalls.EBADF, t.result(dup2SameClosed), "dup2 closed oldfd onto itself");
+        assertEquals(-SystemCalls.EBADF, t.result(dup2NegNew), "dup2 negative newfd");
+        assertEquals(-SystemCalls.EBADF, t.result(dup2HighNew), "dup2 out-of-range newfd");
+    }
 }

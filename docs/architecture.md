@@ -281,7 +281,7 @@ needs nothing extra, since the children it waits on are in the same group and wa
 The wait status says SIGINT, and the memory goes back as for any exit.
 
 System calls so far: `read` (0), `write` (1), `open` (2), `close` (3), `fstat` (5), `lseek` (8),
-`mmap` (9), `getpid` (39), `fork` (57), `execve` (59), `exit` (60), `wait4` (61), `uname` (63), `getppid` (110),
+`mmap` (9), `dup` (32), `dup2` (33), `getpid` (39), `fork` (57), `execve` (59), `exit` (60), `wait4` (61), `uname` (63), `getppid` (110),
 `arch_prctl` (158), `exit_group` (231) and `openat` (257), with Linux's numbers. `SystemCalls.dispatch` is entered from
 the syscall stub without a class-initialization check, so `SystemCalls` keeps no statics that need
 one. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
