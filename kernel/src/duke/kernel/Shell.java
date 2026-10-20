@@ -123,7 +123,7 @@ public final class Shell {
         }
         switch (words.get(0)) {
             case "help" -> {
-                Console.println("commands: help, uptime, mem, gc, cpus, threads, pci, ls [path], cat <path>, run <path> [args], echo <text>, clear, panic");
+                Console.println("commands: help, uptime, mem, gc, cpus, threads, pci, ls [path], cat <path>, hexdump <path>, run <path> [args], echo <text>, clear, panic");
                 if (!Commands.names().isEmpty()) {
                     StringBuilder more = new StringBuilder("also:");
                     for (int i = 0; i < Commands.names().size(); i++) {
@@ -158,6 +158,13 @@ public final class Shell {
                     Console.println("usage: cat <path>");
                 } else {
                     cat(words.get(1));
+                }
+            }
+            case "hexdump" -> {
+                if (words.size() < 2) {
+                    Console.println("usage: hexdump <path>");
+                } else {
+                    hexdump(words.get(1));
                 }
             }
             case "run" -> {
@@ -262,6 +269,57 @@ public final class Shell {
         Console.print(text.toString());
         if (contents.length > 0 && contents[contents.length - 1] != '\n') {
             Console.println("");
+        }
+    }
+
+    private static void hexdump(String path) {
+        Fat fs = Fat.mounted();
+        if (fs == null) {
+            Console.println("hexdump: no filesystem mounted");
+            return;
+        }
+
+        byte[] contents;
+        try {
+            contents = fs.read(path);
+        } catch (IllegalArgumentException e) {
+            Console.println("hexdump: " + e.getMessage());
+            return;
+        }
+
+        String hex = "0123456789abcdef";
+
+        for (int offset = 0; offset < contents.length; offset += 16) {
+            StringBuilder line = new StringBuilder();
+
+            for (int shift = 28; shift >= 0; shift -= 4) {
+                line.append(hex.charAt((offset >>> shift) & 0xF));
+            }
+            line.append(": ");
+
+            StringBuilder ascii = new StringBuilder();
+
+            for (int i = 0; i < 16; i++) {
+                int index = offset + i;
+
+                if (index < contents.length) {
+                    int value = contents[index] & 0xFF;
+
+                    line.append(hex.charAt(value >>> 4));
+                    line.append(hex.charAt(value & 0xF));
+                    ascii.append(value >= 0x20 && value <= 0x7E
+                        ? (char) value : '.');
+                } else {
+                    line.append("  ");
+                }
+
+                if (i < 15) {
+                    line.append(' ');
+                }
+            }
+
+            line.append("  ").append(ascii.toString());
+            Console.println(line.toString());
         }
     }
 

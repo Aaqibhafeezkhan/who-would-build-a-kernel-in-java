@@ -104,6 +104,9 @@ public class ShellTest {
             failures += check("ls", () -> type(serial, "ls\n"), "A Long File Name.md  16");
             failures += check("cat", () -> type(serial, "cat hello.txt\n"), "hello from FAT32");
             failures += check("cat nested", () -> type(serial, "cat docs/deeper/notes.txt\n"), "nested");
+            failures += check("hexdump first line", () -> type(serial, "hexdump /big.bin\n"), "00000000: 03 0a 11 18 1f 26 2d 34 3b 42 49 50 57 5e 65 6c  .....&-4;BIPW^el");
+            failures += check("hexdump last line", () -> type(serial, "hexdump /big.bin\n"), "00001380: 83 8a 91 98 9f a6 ad b4 " + " ".repeat(25) + "........");
+            failures += check("help lists hexdump", () -> type(serial, "help\n"), "hexdump <path>");
             failures += check("run", () -> type(serial, "run /bin/hello\n"), "hello from ring 3, I am /bin/hello");
             failures += check("run a crash", () -> type(serial, "run bin/crash\n"), "bin/crash: #GP");
             failures += check("run a text file", () -> type(serial, "run hello.txt\n"), "run: hello.txt: not an ELF file");
