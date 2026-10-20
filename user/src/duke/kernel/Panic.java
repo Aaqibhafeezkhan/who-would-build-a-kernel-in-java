@@ -34,6 +34,28 @@ public final class Panic {
         Console.writeTo(Console.STDERR, line.toString(), true);
     }
 
+    /** An exception that left main, reported as HotSpot does: on stderr, then exit status 1. */
+    public static void uncaught(Throwable exception) {
+        StringBuilder report = new StringBuilder("Exception in thread \"main\" ");
+        report.append(exception.toString());
+        appendFrames(report, exception);
+        for (Throwable cause = exception.getCause(); cause != null; cause = cause.getCause()) {
+            report.append("\nCaused by: ").append(cause.toString());
+            appendFrames(report, cause);
+        }
+        Console.writeTo(Console.STDERR, report.toString(), true);
+        haltForever();
+    }
+
+    private static void appendFrames(StringBuilder report, Throwable exception) {
+        for (StackTraceElement frame : exception.getStackTrace()) {
+            // _start and anything else without a class isn't Java, which is all HotSpot shows.
+            if (!frame.getClassName().isEmpty()) {
+                report.append("\n\tat ").append(frame.toString());
+            }
+        }
+    }
+
     private static void haltWithTrace(long rbp) {
         Backtrace.print(Magic.peekLong(rbp + 8) - 1, Magic.peekLong(rbp));
         haltForever();

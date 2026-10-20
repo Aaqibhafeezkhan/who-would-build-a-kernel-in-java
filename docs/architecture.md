@@ -302,7 +302,9 @@ first touched, so the backing's commit has nothing to do, and the collector runs
 the kernel, with no other threads to stop. `main` may take `String[] args` or nothing, as on
 HotSpot. If it takes them, `_start` calls `UserRuntime.arguments` after the initializers have run,
 which builds them from the argv Linux's initial stack layout left, decoding UTF-8 into our Latin-1
-strings.
+strings. `System.err` writes to fd 2. An exception that leaves `main` goes to `Panic.uncaught`,
+which the kernel turns into a panic and a user program into HotSpot's `Exception in thread "main"`
+report, minus the frames that aren't Java (`_start`), and exit status 1.
 `make user-test` runs each program in `tests/user` on HotSpot, on Linux and on Duke and compares
 the three.
 

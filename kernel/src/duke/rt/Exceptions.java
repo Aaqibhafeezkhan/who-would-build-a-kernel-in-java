@@ -48,8 +48,6 @@ final class Exceptions {
             pc = Magic.peekLong(rbp + 8) - 1;
             rbp = Magic.peekLong(rbp);
         }
-        Panic.begin("uncaught ", exception.toString());
-        exception.printEnclosedTrace();
-        Panic.haltForever();
+        Panic.uncaught(exception);
     }
 }

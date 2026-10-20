@@ -8,6 +8,7 @@ import duke.rt.Tib;
 public final class System {
 
     public static final PrintStream out = new PrintStream();
+    public static final PrintStream err = new PrintStream(true);
 
     private System() {
     }

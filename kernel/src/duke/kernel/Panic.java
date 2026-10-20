@@ -32,6 +32,13 @@ public final class Panic {
         Console.println("");
     }
 
+    /** An exception no frame caught. */
+    public static void uncaught(Throwable exception) {
+        begin("uncaught ", exception.toString());
+        exception.printEnclosedTrace();
+        haltForever();
+    }
+
     /** {@code rbp} is the panicking method's own frame; the trace starts at whoever called it. */
     private static void haltWithTrace(long rbp) {
         Backtrace.print(Magic.peekLong(rbp + 8) - 1, Magic.peekLong(rbp));

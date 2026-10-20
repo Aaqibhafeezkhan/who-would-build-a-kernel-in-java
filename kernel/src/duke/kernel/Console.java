@@ -35,6 +35,11 @@ public final class Console {
         unlock(flags);
     }
 
+    /** System.err: the kernel has one console, so the same as print. */
+    public static void printError(String s) {
+        print(s);
+    }
+
     public static void println(String s) {
         long flags = lock();
         print(s);

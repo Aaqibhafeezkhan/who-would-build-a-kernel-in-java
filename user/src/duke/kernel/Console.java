@@ -25,6 +25,10 @@ public final class Console {
         writeTo(STDOUT, s == null ? "null" : s, true);
     }
 
+    public static void printError(String s) {
+        writeTo(STDERR, s, false);
+    }
+
     public static void print(long value) {
         print(String.valueOf(value));
     }
