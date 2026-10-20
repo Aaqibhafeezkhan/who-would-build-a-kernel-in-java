@@ -22,6 +22,9 @@ public class UserJavaTests {
     static final Path DUKEC = ROOT.resolve("compiler/build/install/dukec/bin/dukec");
     static final String PACKAGE = "duke.user";
     static final String BACKENDS = System.getenv().getOrDefault("USER_BACKENDS", "linux,duke");
+    /** Every program gets these, and the same again quoted for Duke's shell. */
+    static final List<String> ARGUMENTS = List.of("one", "two words", "3");
+    static final String SHELL_ARGUMENTS = " one \"two words\" 3";
 
     public static void main(String[] args) throws Exception {
         Files.createDirectories(OUT);
@@ -59,12 +62,14 @@ public class UserJavaTests {
         }
         Path dukeDir = OUT.resolve("duke");
         Files.createDirectories(dukeDir);
-        Map<String, JsTests.Result> onDuke = BACKENDS.contains("duke") ? JsTests.runAllOnDuke(dukeDir, "java", executables) : Map.of();
+        Map<String, JsTests.Result> onDuke = BACKENDS.contains("duke") ? JsTests.runAllOnDuke(dukeDir, "java", executables, SHELL_ARGUMENTS) : Map.of();
 
         int failures = 0;
         for (String name : names) {
-            JsTests.Result expected = JsTests.run(List.of(Path.of(System.getProperty("java.home"), "bin/java").toString(),
+            List<String> java = new ArrayList<>(List.of(Path.of(System.getProperty("java.home"), "bin/java").toString(),
                     "-cp", hostClasses.toString(), PACKAGE + "." + name));
+            java.addAll(ARGUMENTS);
+            JsTests.Result expected = JsTests.run(java);
             JsTests.Result built = builds.get(name);
             if (built.exit() != 0) {
                 System.out.println("FAIL " + name + ": dukec failed\n" + built.output().indent(4));
@@ -72,7 +77,11 @@ public class UserJavaTests {
                 continue;
             }
             if (BACKENDS.contains("linux")) {
-                failures += JsTests.check(name + " (linux)", "hotspot", "dukec", expected, () -> JsTests.run(JsTests.executable(OUT.resolve(name))));
+                failures += JsTests.check(name + " (linux)", "hotspot", "dukec", expected, () -> {
+                    List<String> linux = new ArrayList<>(JsTests.executable(OUT.resolve(name)));
+                    linux.addAll(ARGUMENTS);
+                    return JsTests.run(linux);
+                });
             }
             if (BACKENDS.contains("duke")) {
                 failures += JsTests.check(name + " (duke)", "hotspot", "dukec", expected,

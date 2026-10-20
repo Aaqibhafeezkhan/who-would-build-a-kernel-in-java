@@ -149,7 +149,7 @@ public class JsTests {
                 files.put(name, Files.readAllBytes(exe));
             }
         }
-        results.putAll(runAllOnDuke(dir, "js", files));
+        results.putAll(runAllOnDuke(dir, "js", files, ""));
         return results;
     }
 
@@ -159,7 +159,7 @@ public class JsTests {
      * the program's output, less the "exit status" line it adds for a nonzero exit. Leaves the
      * serial log in {@code dir}.
      */
-    static Map<String, Result> runAllOnDuke(Path dir, String folder, Map<String, byte[]> programs) throws Exception {
+    static Map<String, Result> runAllOnDuke(Path dir, String folder, Map<String, byte[]> programs, String arguments) throws Exception {
         Map<String, byte[]> files = new LinkedHashMap<>();
         programs.forEach((name, bytes) -> files.put(folder + "/" + name, bytes));
         Map<String, Result> results = new LinkedHashMap<>();
@@ -181,7 +181,7 @@ public class JsTests {
             for (String name : files.keySet()) {
                 String path = "/" + name;
                 int from = ShellTest.output.length();
-                ShellTest.type(qemu.getOutputStream(), "run " + path + "\n");
+                ShellTest.type(qemu.getOutputStream(), "run " + path + arguments + "\n");
                 if (!awaitPrompt(from)) {
                     results.put(name.substring(folder.length() + 1), new Result("timed out:\n" + ShellTest.clean(ShellTest.output.substring(from)), -1));
                     break;

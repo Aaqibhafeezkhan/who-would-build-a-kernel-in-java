@@ -299,7 +299,10 @@ thread for now. Before any class initializer, `_start` calls `UserRuntime.init`,
 1 GiB for the heap plus its mark bits and mark stack, and hands them to `Heap.growInto` as the
 kernel's `KernelHeap` does with page tables. Both Linux and Duke fill those pages in as they're
 first touched, so the backing's commit has nothing to do, and the collector runs exactly as in
-the kernel, with no other threads to stop.
+the kernel, with no other threads to stop. `main` may take `String[] args` or nothing, as on
+HotSpot. If it takes them, `_start` calls `UserRuntime.arguments` after the initializers have run,
+which builds them from the argv Linux's initial stack layout left, decoding UTF-8 into our Latin-1
+strings.
 `make user-test` runs each program in `tests/user` on HotSpot, on Linux and on Duke and compares
 the three.
 

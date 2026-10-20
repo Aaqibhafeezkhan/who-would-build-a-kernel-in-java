@@ -159,6 +159,7 @@ public final class Compiler {
     /** A static Linux executable for ring 3 rather than a kernel: no Limine, no privileged boot code. */
     private boolean user;
     private String userRuntimeInit;
+    private String userRuntimeArguments;
 
     public Compiler(ClassPool pool) {
         this.pool = pool;
@@ -204,7 +205,12 @@ public final class Compiler {
     }
 
     public Image compile(String entryClass, String entryMethod) {
-        ClassPool.ResolvedMethod main = pool.resolveMethod(entryClass, entryMethod, "()V");
+        // A program's main may take its arguments or not, as on HotSpot since Java 25; the kernel's takes none.
+        ClassPool.ResolvedMethod main = user ? pool.findMethod(entryClass, entryMethod, "([Ljava/lang/String;)V") : null;
+        boolean mainTakesArguments = main != null;
+        if (main == null) {
+            main = pool.resolveMethod(entryClass, entryMethod, "()V");
+        }
         if (!main.is(AccessFlag.STATIC)) {
             throw new CompileException("entry point " + entryClass + "." + entryMethod + " must be static");
         }
@@ -233,7 +239,10 @@ public final class Compiler {
         String mainSymbol = requireMethod(main);
         if (user) {
             requireClass(USER_RUNTIME);
-            userRuntimeInit = requireMethod(USER_RUNTIME, "init", "()V");
+            userRuntimeInit = requireMethod(USER_RUNTIME, "init", "(J)V");
+            if (mainTakesArguments) {
+                userRuntimeArguments = requireMethod(USER_RUNTIME, "arguments", "()[Ljava/lang/String;");
+            }
         }
 
         do {
@@ -1256,6 +1265,8 @@ public final class Compiler {
         text.align(16);
         int start = text.size();
         X64 a = new X64(text);
+        // Linux's initial stack (argc, argv, envp, auxv): the syscall below leaves r12 alone.
+        a.mov(Reg.R12, Reg.RSP);
         a.lea(Reg.RSP, Mem.rip("boot.stack", USER_STACK_SIZE));
         a.alu(X64.Alu.XOR, false, Reg.RBP, Reg.RBP);
         a.movImm32(Reg.RAX, SYS_ARCH_PRCTL);
@@ -1270,14 +1281,26 @@ public final class Compiler {
             a.lea(Reg.RAX, Mem.rip("boot.stack", STACK_RESERVE));
             a.store(8, STACK_LIMIT, Reg.RAX);
         }
+        // init(long initialStack): a long is two slots.
+        a.push(Reg.R12);
+        a.push(Reg.R12);
         a.call(userRuntimeInit);
+        a.aluImm(X64.Alu.ADD, true, Reg.RSP, 16);
         if (initializers.contains(entryClass)) {
             a.call(initializerSymbol(entryClass));
         }
         for (String type : bootInitializers) {
             a.call(initializerSymbol(type));
         }
-        a.call(mainSymbol);
+        if (userRuntimeArguments != null) {
+            // Built only now, so String and its helpers are initialized; nothing allocates before main has it.
+            a.call(userRuntimeArguments);
+            a.push(Reg.RAX);
+            a.call(mainSymbol);
+            a.aluImm(X64.Alu.ADD, true, Reg.RSP, 8);
+        } else {
+            a.call(mainSymbol);
+        }
         a.movImm32(Reg.RAX, SYS_EXIT_GROUP);
         a.alu(X64.Alu.XOR, false, Reg.RDI, Reg.RDI);
         a.syscall();
