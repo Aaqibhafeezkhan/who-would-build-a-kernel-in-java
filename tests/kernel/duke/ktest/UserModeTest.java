@@ -279,6 +279,82 @@ final class UserModeTest {
         }
     }
 
+    static void testClockGettimeWritesMonotonicTime() {
+        Program p = new Program();
+        int offset = 64;
+
+        p.load(new Code()
+            .movEax(SystemCalls.CLOCK_GETTIME)
+            .movEdi(SystemCalls.CLOCK_MONOTONIC)
+            .movRsi(p.data + offset)
+            .syscall()
+            .exitWithResult());
+
+        try {
+            assertEquals(0, p.run(), "clock_gettime");
+            long seconds = Magic.peekLong(p.kernelView(offset));
+            long nanos = Magic.peekLong(p.kernelView(offset + 8));
+
+            assertTrue(seconds >= 0, "nonnegative seconds");
+            assertTrue(nanos >= 0 && nanos < 1_000_000_000L,
+                "nanoseconds in range");
+            assertEquals(0, nanos % 1_000_000L, "millisecond precision");
+        } finally {
+            p.free();
+        }
+    }
+
+    static void testClockGettimeRejectsUnsupportedClock() {
+        assertEquals(-SystemCalls.EINVAL,
+            run(new Code()
+                .movEax(SystemCalls.CLOCK_GETTIME)
+                .movEdi(0)
+                .movRsi(BASE + 64)
+                .syscall()
+                .exitWithResult()),
+            "unsupported clock");
+    }
+
+    static void testNanosleepRejectsInvalidTimespec() {
+        Program p = new Program();
+        int offset = 64;
+
+        // Negative seconds.
+        Magic.pokeLong(p.kernelView(offset), -1);
+        Magic.pokeLong(p.kernelView(offset + 8), 0);
+
+        p.load(new Code()
+            .movEax(SystemCalls.NANOSLEEP)
+            .movEdi((int)(p.data + offset))
+            .b(0x31, 0xF6) // xor esi, esi: remaining = NULL
+            .syscall()
+            .exitWithResult());
+
+        try {
+            assertEquals(-SystemCalls.EINVAL, p.run(), "negative seconds");
+        } finally {
+            p.free();
+        }
+
+        // tv_nsec must be less than one second.
+        Program q = new Program();
+        Magic.pokeLong(q.kernelView(offset), 0);
+        Magic.pokeLong(q.kernelView(offset + 8), 1_000_000_000L);
+
+        q.load(new Code()
+            .movEax(SystemCalls.NANOSLEEP)
+            .movEdi((int)(q.data + offset))
+            .b(0x31, 0xF6)
+            .syscall()
+            .exitWithResult());
+
+        try {
+            assertEquals(-SystemCalls.EINVAL, q.run(), "nanoseconds out of range");
+        } finally {
+            q.free();
+        }
+    }
+
     static void testGetcwdWritesRootAndNul() {
         Program p = new Program();
         int offset = 64;
@@ -631,6 +707,54 @@ final class UserModeTest {
             threads[i].join();
             programs[i].free();
             assertEquals(i, results[i], "program " + i);
+        }
+    }
+    static void testNanosleepWaitsAtLeastRequestedDuration() {
+        Program p = new Program();
+        int startOffset = 64;
+        int requestOffset = 96;
+        int endOffset = 128;
+
+        // nanosleep request: 0 seconds, 50,000,000 nanoseconds.
+        Magic.pokeLong(p.kernelView(requestOffset), 0);
+        Magic.pokeLong(p.kernelView(requestOffset + 8), 50_000_000L);
+
+        p.load(new Code()
+            // clock_gettime(CLOCK_MONOTONIC, &start)
+            .movEax(SystemCalls.CLOCK_GETTIME)
+            .movEdi(SystemCalls.CLOCK_MONOTONIC)
+            .movRsi(p.data + startOffset)
+            .syscall()
+
+            // nanosleep(&request, NULL)
+            .movEax(SystemCalls.NANOSLEEP)
+            .movEdi((int) (p.data + requestOffset))
+            .b(0x31, 0xF6) // xor esi, esi: remaining = NULL
+            .syscall()
+
+            // clock_gettime(CLOCK_MONOTONIC, &end)
+            .movEax(SystemCalls.CLOCK_GETTIME)
+            .movEdi(SystemCalls.CLOCK_MONOTONIC)
+            .movRsi(p.data + endOffset)
+            .syscall()
+            .exitWithResult());
+
+        try {
+            assertEquals(0, p.run(), "clock and nanosleep syscalls");
+
+            long startSeconds = Magic.peekLong(p.kernelView(startOffset));
+            long startNanos = Magic.peekLong(p.kernelView(startOffset + 8));
+            long endSeconds = Magic.peekLong(p.kernelView(endOffset));
+            long endNanos = Magic.peekLong(p.kernelView(endOffset + 8));
+
+            long start = startSeconds * 1_000_000_000L + startNanos;
+            long end = endSeconds * 1_000_000_000L + endNanos;
+            long elapsed = end - start;
+
+            assertTrue(elapsed >= 50_000_000L,
+                "nanosleep should wait at least 50 ms, elapsed=" + elapsed + " ns");
+        } finally {
+            p.free();
         }
     }
 }

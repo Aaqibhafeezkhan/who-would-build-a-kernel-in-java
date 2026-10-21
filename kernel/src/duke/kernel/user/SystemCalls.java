@@ -9,6 +9,7 @@ import duke.kernel.mm.PhysicalMemory;
 import duke.kernel.x86.Frame;
 import duke.kernel.x86.UserState;
 import duke.rt.Magic;
+import duke.kernel.time.Timer;
 
 /**
  * System calls, numbered and passed the way Linux's are on x86-64: the number in rax, arguments
@@ -89,6 +90,13 @@ public final class SystemCalls {
     /** The saved registers, then the user's rsp, then the frame record enterUser left (Compiler.emitSyscallEntry). */
     private static final int FRAME_BYTES = 128;
 
+    public static final int NANOSLEEP = 35;
+    public static final int CLOCK_GETTIME = 228;
+    public static final int CLOCK_MONOTONIC = 1;
+    private static final long NANOS_PER_SECOND = 1_000_000_000L;
+    private static final long NANOS_PER_MILLISECOND = 1_000_000L;
+    private static final long TIMER_RESOLUTION_NANOS = NANOS_PER_SECOND / Timer.HZ;
+
     private SystemCalls() {
     }
 
@@ -148,6 +156,11 @@ public final class SystemCalls {
             Magic.disableInterrupts();
             Magic.leaveUser(frame + FRAME_BYTES, (int) a0);
             return;
+
+        } else if (number == CLOCK_GETTIME) {
+            result = clockGettime(a0, a1);
+        } else if (number == NANOSLEEP) {
+            result = nanosleep(a0, a1);
         } else {
             result = -ENOSYS;
         }
@@ -499,6 +512,45 @@ public final class SystemCalls {
             byte b = i < value.length() ? (byte) value.charAt(i) : 0;
             Magic.pokeByte(address + i, b);
         }
+    }
+
+    private static long clockGettime(long clockId, long address) {
+        if (clockId != CLOCK_MONOTONIC) {
+            return -EINVAL;
+        }
+        if (!userWritable(address, 16)) {
+            return -EFAULT;
+        }
+
+        long millis = Timer.uptimeMillis();
+        Magic.pokeLong(address, millis / 1000);
+        Magic.pokeLong(address + 8, (millis % 1000) * NANOS_PER_MILLISECOND);
+        return 0;
+    }
+
+    private static long nanosleep(long request, long remaining) {
+        if (!userReadable(request, 16)) {
+            return -EFAULT;
+        }
+
+        long seconds = Magic.peekLong(request);
+        long nanos = Magic.peekLong(request + 8);
+
+        if (seconds < 0 || nanos < 0 || nanos >= NANOS_PER_SECOND) {
+            return -EINVAL;
+        }
+
+        // Avoid overflow when converting the requested duration to nanoseconds.
+        if (seconds > (Long.MAX_VALUE - nanos) / NANOS_PER_SECOND) {
+            return -EINVAL;
+        }
+        long durationNanos = seconds * NANOS_PER_SECOND + nanos;
+        if (durationNanos == 0) {
+            return 0;
+        }
+
+        Scheduler.sleep(durationNanos / NANOS_PER_MILLISECOND + 1000 / Timer.HZ);
+        return 0;
     }
 
 }
