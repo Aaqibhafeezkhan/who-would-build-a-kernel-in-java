@@ -6,8 +6,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A user program: one address space and, for now, the one kernel thread that runs it. Pids count
- * up from 1 and are never reused.
+ * A user program: one address space and the kernel threads that run it, one per thread clone made.
+ * Pids and tids come from one counter, up from 1 and never reused, and the first thread's tid is the
+ * pid. The process ends when its last thread does; exit_group, a fault or {@link #kill} make the
+ * others leave at their next interrupt or system call.
  *
  * <p>A process that ends stays in the table as a zombie, holding only its exit status, until its
  * parent collects it with wait4 or the kernel code that started it calls {@link #waitFor}. Its
@@ -31,18 +33,32 @@ public final class Process {
     private static final List<Process> TABLE = new ArrayList<>();
     private static int lastPid;
 
-    /** The thread a process runs on, so system calls can find their process. */
-    private static final class Runner extends Thread {
+    /** A kernel thread running one of a process's threads, so system calls can find their process. */
+    static final class Runner extends Thread {
         final Process process;
+        final int tid;
+        // Where it starts in ring 3; a clone's or forked child's registers and FS, GS and FPU state.
+        private long entry;
+        private long stack;
+        private long[] registers;
+        private UserState userState;
+        /** CLONE_CHILD_CLEARTID's word, zeroed and woken when the thread exits; 0 for none. */
+        final long clearTid;
 
-        Runner(Process process, String name) {
-            super(name);
+        Runner(Process process, int tid, long entry, long stack, long[] registers, UserState state, long clearTid) {
+            super(process.name);
             this.process = process;
+            this.tid = tid;
+            this.entry = entry;
+            this.stack = stack;
+            this.registers = registers;
+            this.userState = state;
+            this.clearTid = clearTid;
         }
 
         @Override
         public void run() {
-            process.runInThread();
+            process.runInThread(this);
         }
     }
 
@@ -53,15 +69,17 @@ public final class Process {
     private final Process group;
     /** Only the group leader's counts: set once, by kill. */
     private volatile boolean killed;
+    /** Set once, by exit_group or a fault: every thread is to leave ring 3. */
+    private volatile boolean exiting;
+    /** exit_group's status, when exiting came from there. */
+    private boolean groupExited;
+    private long groupStatus;
+    /** Threads that haven't ended yet. */
+    private int live = 1;
     /** Collected by the kernel's waitFor rather than a parent's wait4. */
     private final boolean startedByKernel;
-    // The image the thread runs next: replaced by execve, and freed when it's left behind.
+    // The image the threads run: replaced by execve, and freed when it's left behind.
     private AddressSpace space;
-    private long entry;
-    private long stack;
-    /** A forked child's first registers and FS, GS and FPU state; null to start from zeroes. */
-    private long[] registers;
-    private UserState userState;
     /** What execve loaded, for the thread to switch to once it's out of ring 3. */
     private Elf.Image pendingImage;
     private final Runner thread;
@@ -71,19 +89,18 @@ public final class Process {
     private boolean interrupted;
     final FileTable files = new FileTable();
 
-    private Process(String name, Process parent, AddressSpace space, long entry, long stack) {
+    private Process(String name, Process parent, AddressSpace space, long entry, long stack, long[] registers,
+            UserState state) {
         this.name = name;
         this.parent = parent;
         this.startedByKernel = parent == null;
         this.group = parent == null ? this : parent.group;
         this.space = space;
-        this.entry = entry;
-        this.stack = stack;
         synchronized (LOCK) {
             pid = ++lastPid;
             TABLE.add(this);
         }
-        thread = new Runner(this, name);
+        thread = new Runner(this, pid, entry, stack, registers, state, 0);
     }
 
     /**
@@ -92,7 +109,7 @@ public final class Process {
      * when the kernel starts it, and then the caller has to {@link #waitFor} it.
      */
     public static Process start(String name, Process parent, AddressSpace space, long entry, long stack) {
-        Process p = new Process(name, parent, space, entry, stack);
+        Process p = new Process(name, parent, space, entry, stack, null, null);
         p.thread.start();
         return p;
     }
@@ -106,10 +123,23 @@ public final class Process {
         return Thread.currentThread() instanceof Runner r ? r.process : null;
     }
 
-    /** Whether the calling thread runs a process that's been killed. Allocates nothing. */
+    /** The calling thread's tid, or 0 for a kernel thread. */
+    static int currentTid() {
+        return Thread.currentThread() instanceof Runner r ? r.tid : 0;
+    }
+
+    /** CLONE_CHILD_CLEARTID's word for the calling thread, or 0. */
+    static long currentClearTid() {
+        return Thread.currentThread() instanceof Runner r ? r.clearTid : 0;
+    }
+
+    /**
+     * Whether the calling thread's process has been killed or is exiting, so the thread is to leave
+     * ring 3 rather than carry on. Allocates nothing.
+     */
     public static boolean killedHere() {
         Process p = current();
-        return p != null && p.group.killed;
+        return p != null && (p.group.killed || p.exiting);
     }
 
     /**
@@ -133,12 +163,45 @@ public final class Process {
      * registers (rax aside, 0 in the child), FS, GS and FPU state, memory and open files.
      */
     static Process fork(Process parent, AddressSpace space, long rip, long rsp, long[] registers, UserState state) {
-        Process child = new Process(parent.name, parent, space, rip, rsp);
-        child.registers = registers;
-        child.userState = state;
+        Process child = new Process(parent.name, parent, space, rip, rsp, registers, state);
         child.files.copyFrom(parent.files);
         child.thread.start();
         return child;
+    }
+
+    /**
+     * For clone: a new thread in this process, carrying on from {@code rip} with {@code rsp} and the
+     * given registers and state. Started by {@link Runner#start}, once the caller has stored its tid
+     * where clone was asked to. Null if the process is already on its way out.
+     */
+    Runner newThread(long rip, long rsp, long[] registers, UserState state, long clearTid) {
+        synchronized (LOCK) {
+            if (exiting || group.killed) {
+                return null;
+            }
+            live++;
+            return new Runner(this, ++lastPid, rip, rsp, registers, state, clearTid);
+        }
+    }
+
+    /** True when the calling thread is the only one left, as execve needs. */
+    boolean singleThreaded() {
+        synchronized (LOCK) {
+            return live == 1;
+        }
+    }
+
+    /** exit_group: the process ends with {@code status} once every thread has left ring 3. */
+    void exitGroup(long status) {
+        synchronized (LOCK) {
+            if (!exiting) {
+                groupExited = true;
+                groupStatus = status;
+                exiting = true;
+            }
+            // A thread in wait4 is waiting on this.
+            LOCK.notifyAll();
+        }
     }
 
     /** For execve: run {@code image} instead once this process's thread leaves ring 3. */
@@ -146,31 +209,43 @@ public final class Process {
         pendingImage = image;
     }
 
-    private void runInThread() {
+    private void runInThread(Runner self) {
         long status = 0;
         UserMode.Fault faulted = null;
         while (true) {
             try {
-                status = group.killed ? UserMode.KILLED : UserMode.run(space, entry, stack, registers, userState);
+                status = killedHere() ? UserMode.KILLED
+                        : UserMode.run(space, self.entry, self.stack, self.registers, self.userState);
             } catch (UserMode.Fault f) {
                 faulted = f;
             }
-            space.free();
             if (faulted != null || status != UserMode.EXECED) {
                 break;
             }
+            // execve only goes ahead with one thread, so nothing else runs in the old image.
+            space.free();
             space = pendingImage.space;
-            entry = pendingImage.entry;
-            stack = pendingImage.stack;
-            registers = null;
-            userState = null;
+            self.entry = pendingImage.entry;
+            self.stack = pendingImage.stack;
+            self.registers = null;
+            self.userState = null;
             pendingImage = null;
         }
         synchronized (LOCK) {
+            if (faulted != null && fault == null) {
+                fault = faulted;
+                exiting = true;
+                LOCK.notifyAll();
+            }
+            if (--live > 0) {
+                return;
+            }
+        }
+        space.free();
+        synchronized (LOCK) {
             ended = true;
-            interrupted = status == UserMode.KILLED;
-            exitStatus = interrupted ? 0 : status;
-            fault = faulted;
+            interrupted = fault == null && !groupExited && status == UserMode.KILLED;
+            exitStatus = groupExited ? groupStatus : interrupted ? 0 : status;
             for (int i = TABLE.size() - 1; i >= 0; i--) {
                 Process child = TABLE.get(i);
                 if (child.parent == this) {
@@ -241,6 +316,8 @@ public final class Process {
     static final Reaped NO_CHILD = new Reaped(-1, 0);
     /** WNOHANG, and a matching child is still running. */
     static final Reaped STILL_RUNNING = new Reaped(0, 0);
+    /** The waiting thread's own process is exiting or was killed. */
+    static final Reaped INTERRUPTED = new Reaped(0, 0);
 
     /**
      * wait4 for {@code parent}: collects a child that has ended, the one with {@code pid} or any
@@ -260,6 +337,9 @@ public final class Process {
                         return new Reaped(child.pid, child.waitStatus());
                     }
                     any = true;
+                }
+                if (killedHere()) {
+                    return INTERRUPTED;
                 }
                 if (!any) {
                     return NO_CHILD;

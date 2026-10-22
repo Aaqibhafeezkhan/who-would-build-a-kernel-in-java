@@ -1,5 +1,6 @@
 package duke.kernel.mm;
 
+import duke.rt.SpinLock;
 import java.util.Arrays;
 
 /**
@@ -9,6 +10,10 @@ import java.util.Arrays;
  * <p>Pages are mapped up front with {@link #allocate}, or reserved with {@link #reserve} and mapped
  * zeroed the first time they're touched ({@link #pageIn}), so a process can ask for far more than
  * it uses, as Linux lets it.
+ *
+ * <p>A process's threads share it, on any CPU at once. Page faults map pages under a spin lock, since
+ * they come with interrupts off, and see reservations without one: {@link #reserve} only ever appends,
+ * and publishes each before counting it.
  */
 public final class AddressSpace {
 
@@ -18,11 +23,10 @@ public final class AddressSpace {
     private static final long PAGE = PhysicalMemory.PAGE_SIZE;
 
     private final PageTable table = PageTable.sharingHigherHalf(KernelAddressSpace.table());
-    // Reserved ranges, as parallel arrays so pageIn can search them without allocating.
-    private long[] starts = new long[4];
-    private long[] ends = new long[4];
-    private long[] flags = new long[4];
-    private int reserved;
+    // Reserved ranges as (start, end, flags), so pageIn can search them without allocating.
+    private long[] ranges = new long[3 * 4];
+    private volatile int reserved;
+    private final int[] pageInLock = new int[1];
     // Where mmap looks for room: the gap between the executable and the stack, filled from the top.
     private long mapFloor = END;
     private long mapTop = END;
@@ -43,25 +47,23 @@ public final class AddressSpace {
      * Reserves [start, start + length) for {@link #pageIn} to fill with {@code flags}. Both must be
      * page-aligned, and the range can't overlap another reservation.
      */
-    public void reserve(long start, long length, long flags) {
+    public synchronized void reserve(long start, long length, long flags) {
         checkUser(start, length);
         if ((start | length) % PAGE != 0) {
             throw new IllegalArgumentException("unaligned reservation");
         }
         for (int i = 0; i < reserved; i++) {
-            if (start < ends[i] && starts[i] < start + length) {
+            if (start < ranges[3 * i + 1] && ranges[3 * i] < start + length) {
                 throw new IllegalArgumentException("overlaps another reservation");
             }
         }
-        if (reserved == starts.length) {
-            starts = Arrays.copyOf(starts, reserved * 2);
-            ends = Arrays.copyOf(ends, reserved * 2);
-            this.flags = Arrays.copyOf(this.flags, reserved * 2);
-        }
-        starts[reserved] = start;
-        ends[reserved] = start + length;
-        this.flags[reserved] = flags;
-        reserved++;
+        long[] r = 3 * reserved == ranges.length ? Arrays.copyOf(ranges, 2 * ranges.length) : ranges;
+        r[3 * reserved] = start;
+        r[3 * reserved + 1] = start + length;
+        r[3 * reserved + 2] = flags;
+        // The entry and the array before the count: a fault on another CPU that sees the count sees them.
+        ranges = r;
+        reserved = reserved + 1;
     }
 
     /**
@@ -71,30 +73,38 @@ public final class AddressSpace {
      */
     public boolean pageIn(long address) {
         long page = address & -PAGE;
-        for (int i = 0; i < reserved; i++) {
-            if (page >= starts[i] && page < ends[i]) {
-                if (table.flags(page) != 0) {
-                    return false;
+        int n = reserved;
+        long[] r = ranges;
+        for (int i = 0; i < n; i++) {
+            if (page >= r[3 * i] && page < r[3 * i + 1]) {
+                long flags = SpinLock.lockInterruptsOff(pageInLock);
+                try {
+                    // Another thread's fault may have mapped it since this one was raised.
+                    if (table.flags(page) != 0) {
+                        return true;
+                    }
+                    long frame = PhysicalMemory.tryAllocateZeroed();
+                    if (frame < 0) {
+                        return false;
+                    }
+                    table.map(page, frame, r[3 * i + 2] | PageTable.USER);
+                    return true;
+                } finally {
+                    SpinLock.unlockInterruptsOff(pageInLock, flags);
                 }
-                long frame = PhysicalMemory.tryAllocateZeroed();
-                if (frame < 0) {
-                    return false;
-                }
-                table.map(page, frame, flags[i] | PageTable.USER);
-                return true;
             }
         }
         return false;
     }
 
     /** Lets {@link #map} hand out [floor, top), top down. */
-    public void setMapRange(long floor, long top) {
+    public synchronized void setMapRange(long floor, long top) {
         mapFloor = floor;
         mapTop = top;
     }
 
     /** Reserves {@code length} bytes (rounded up to pages) somewhere free, or returns -1 if there's no room. */
-    public long map(long length, long flags) {
+    public synchronized long map(long length, long flags) {
         long bytes = (length + PAGE - 1) & -PAGE;
         if (length <= 0 || bytes <= 0 || bytes > mapTop - mapFloor) {
             return -1;
@@ -109,7 +119,7 @@ public final class AddressSpace {
      * A copy for fork: every mapped page copied, every reservation and the mmap range kept, so
      * the child pages in what the parent never touched. Frees what it took if memory runs out.
      */
-    public AddressSpace copy() {
+    public synchronized AddressSpace copy() {
         AddressSpace child = new AddressSpace();
         try {
             table.copyLowerHalfInto(child.table);
@@ -117,9 +127,7 @@ public final class AddressSpace {
             child.free();
             throw e;
         }
-        child.starts = Arrays.copyOf(starts, starts.length);
-        child.ends = Arrays.copyOf(ends, ends.length);
-        child.flags = Arrays.copyOf(flags, flags.length);
+        child.ranges = Arrays.copyOf(ranges, ranges.length);
         child.reserved = reserved;
         child.mapFloor = mapFloor;
         child.mapTop = mapTop;

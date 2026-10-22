@@ -100,7 +100,10 @@ final class ElfTest {
             assertTrue(image.space.pageIn(bottom + 8), "a fault there pages it in");
             assertTrue((t.flags(bottom) & PageTable.WRITABLE) != 0, "writable");
             assertTrue(!image.space.pageIn(bottom - 8), "the page below the stack stays unmapped");
-            assertTrue(!image.space.pageIn(bottom), "a second fault on the same page isn't a page-in");
+            long frame = t.translate(bottom);
+            // Another thread's fault can map it between this one's and its handler: retry, don't fault.
+            assertTrue(image.space.pageIn(bottom), "a second fault on the same page retries");
+            assertEquals(frame, t.translate(bottom), "without mapping another frame");
         } finally {
             image.space.free();
         }

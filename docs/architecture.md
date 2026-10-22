@@ -251,7 +251,7 @@ allocation). That's what lets `jsc`'s programs reserve a 1 GiB heap on a 256 MiB
 `mmap` takes private anonymous mappings only, placed top down in the gap between the executable
 and the stack.
 
-A `Process` wraps that: a pid, a parent, an address space and the kernel thread that runs it.
+A `Process` wraps that: a pid, a parent, an address space and the kernel threads that run it.
 It frees its memory as soon as it ends but stays in the table as a zombie until its parent's
 `wait4` or, for one the kernel started, `waitFor` collects its status. A process whose parent has
 ended is dropped as soon as it ends itself. The shell's `run` starts one and waits.
@@ -271,6 +271,17 @@ image into a fresh address space first, so a bad path or file returns an error t
 then it leaves user mode the way `exit` does, with `UserMode.EXECED` as the status, and the
 process's thread frees the old image and runs the new one. The pid, parent and files carry over.
 
+`clone` makes threads only (`CLONE_THREAD` and friends; a new process is still `fork`'s job): a
+kernel thread in the same process, starting from the caller's registers on the stack it was given,
+with tids from the pid counter and the first thread's tid the pid. `exit` ends the calling thread,
+and the process ends with its last one. `exit_group`, a fault in any thread, or Ctrl-C mark the
+process so every other thread leaves ring 3 at its next interrupt or system call, the way a kill
+does. `futex` waits and wakes on a word of the process's memory, under one lock for every futex;
+`CLONE_CHILD_CLEARTID` zeroes and wakes the thread's word when it exits, which is how a join hears
+about it. Threads share the address space on any CPU at once, so a page fault maps its page under
+a spin lock, and a fault on a page another thread's fault has just mapped retries instead of
+failing. `execve` needs the caller to be the only thread left.
+
 Ctrl-C kills the foreground process and everything forked from it: a process the kernel starts
 leads a group its descendants join, as a shell job would. While `run` waits, the input layer takes
 Ctrl-C as a flag for the shell rather than a character for the program, and the shell sets the
@@ -281,8 +292,9 @@ needs nothing extra, since the children it waits on are in the same group and wa
 The wait status says SIGINT, and the memory goes back as for any exit.
 
 System calls so far: `read` (0), `write` (1), `open` (2), `close` (3), `fstat` (5), `lseek` (8),
-`mmap` (9), `dup` (32), `dup2` (33), `getpid` (39), `fork` (57), `execve` (59), `exit` (60), `wait4` (61), `uname` (63), `getppid` (110),
-`arch_prctl` (158), `exit_group` (231) and `openat` (257), with Linux's numbers. `SystemCalls.dispatch` is entered from
+`mmap` (9), `dup` (32), `dup2` (33), `nanosleep` (35), `getpid` (39), `clone` (56), `fork` (57), `execve` (59), `exit` (60), `wait4` (61),
+`uname` (63), `getcwd` (79), `getppid` (110), `arch_prctl` (158), `gettid` (186), `futex` (202), `clock_gettime` (228), `exit_group` (231)
+and `openat` (257), with Linux's numbers. `SystemCalls.dispatch` is entered from
 the syscall stub without a class-initialization check, so `SystemCalls` keeps no statics that need
 one. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
 the host, put on a FAT disk, and run one after another through the shell in a single boot, with

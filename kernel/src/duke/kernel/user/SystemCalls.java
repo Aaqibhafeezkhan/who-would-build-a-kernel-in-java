@@ -27,6 +27,7 @@ public final class SystemCalls {
     public static final int DUP = 32;
     public static final int DUP2 = 33;
     public static final int GETPID = 39;
+    public static final int CLONE = 56;
     public static final int FORK = 57;
     public static final int EXECVE = 59;
     public static final int WAIT4 = 61;
@@ -34,6 +35,8 @@ public final class SystemCalls {
     public static final int GETCWD = 79;
     public static final int GETPPID = 110;
     public static final int ARCH_PRCTL = 158;
+    public static final int GETTID = 186;
+    public static final int FUTEX = 202;
     public static final int EXIT = 60;
     public static final int EXIT_GROUP = 231;
     public static final int OPENAT = 257;
@@ -47,6 +50,7 @@ public final class SystemCalls {
     public static final int ENOEXEC = 8;
     public static final int EBADF = 9;
     public static final int ECHILD = 10;
+    public static final int EAGAIN = 11;
     public static final int ENOMEM = 12;
     public static final int EACCES = 13;
     public static final int EFAULT = 14;
@@ -59,6 +63,7 @@ public final class SystemCalls {
     public static final int ENAMETOOLONG = 36;
     public static final int ERANGE = 34;
     public static final int ENOSYS = 38;
+    public static final int ETIMEDOUT = 110;
 
     public static final int PROT_READ = 1;
     public static final int PROT_WRITE = 2;
@@ -84,6 +89,22 @@ public final class SystemCalls {
     public static final int ARCH_SET_FS = 0x1002;
     public static final int ARCH_GET_FS = 0x1003;
     public static final int ARCH_GET_GS = 0x1004;
+    public static final int CLONE_VM = 0x100;
+    public static final int CLONE_FS = 0x200;
+    public static final int CLONE_FILES = 0x400;
+    public static final int CLONE_SIGHAND = 0x800;
+    public static final int CLONE_THREAD = 0x10000;
+    public static final int CLONE_SYSVSEM = 0x40000;
+    public static final int CLONE_SETTLS = 0x80000;
+    public static final int CLONE_PARENT_SETTID = 0x100000;
+    public static final int CLONE_CHILD_CLEARTID = 0x200000;
+    public static final int CLONE_DETACHED = 0x400000;
+    public static final int CLONE_CHILD_SETTID = 0x1000000;
+    /** What a thread shares with the one that made it; the only kind of clone there is so far. */
+    public static final int CLONE_THREAD_FLAGS = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
+    public static final int FUTEX_WAIT = 0;
+    public static final int FUTEX_WAKE = 1;
+    public static final int FUTEX_PRIVATE_FLAG = 128;
     /** sizeof(struct rusage), which wait4 zeroes: nothing's accounted yet. */
     private static final int RUSAGE_BYTES = 144;
 
@@ -95,7 +116,6 @@ public final class SystemCalls {
     public static final int CLOCK_MONOTONIC = 1;
     private static final long NANOS_PER_SECOND = 1_000_000_000L;
     private static final long NANOS_PER_MILLISECOND = 1_000_000L;
-    private static final long TIMER_RESOLUTION_NANOS = NANOS_PER_SECOND / Timer.HZ;
 
     private SystemCalls() {
     }
@@ -144,6 +164,13 @@ public final class SystemCalls {
             result = getcwd(a0, a1);
         } else if (number == FORK) {
             result = fork(frame);
+        } else if (number == CLONE) {
+            result = clone(frame, a0, a1, a2, Frame.register(frame, Frame.R10), Frame.register(frame, Frame.R8));
+        } else if (number == FUTEX) {
+            result = futex(a0, a1, a2, Frame.register(frame, Frame.R10));
+        } else if (number == GETTID) {
+            int tid = Process.currentTid();
+            result = tid == 0 ? -ENOSYS : tid;
         } else if (number == EXECVE) {
             result = execve(a0, a1, a2);
             if (result == 0) {
@@ -153,10 +180,19 @@ public final class SystemCalls {
                 return;
             }
         } else if (number == EXIT || number == EXIT_GROUP) {
+            Process self = Process.current();
+            if (number == EXIT_GROUP && self != null) {
+                self.exitGroup((int) a0);
+            }
+            long clearTid = Process.currentClearTid();
+            // How a thread joining this one hears it's gone, as pthread_join does on Linux.
+            if (number == EXIT && clearTid != 0 && userWritable(clearTid, 4)) {
+                Magic.pokeInt(clearTid, 0);
+                Futex.wake(Scheduler.addressSpace(), clearTid, 1);
+            }
             Magic.disableInterrupts();
             Magic.leaveUser(frame + FRAME_BYTES, (int) a0);
             return;
-
         } else if (number == CLOCK_GETTIME) {
             result = clockGettime(a0, a1);
         } else if (number == NANOSLEEP) {
@@ -215,6 +251,9 @@ public final class SystemCalls {
         if (reaped == Process.NO_CHILD) {
             return -ECHILD;
         }
+        if (reaped == Process.INTERRUPTED) {
+            return -EINTR;
+        }
         if (reaped.pid > 0) {
             if (status != 0) {
                 Magic.pokeInt(status, reaped.status);
@@ -258,6 +297,81 @@ public final class SystemCalls {
     }
 
     /**
+     * A new thread in the caller's process, carrying on from this system call on {@code stack} and
+     * returning 0, with the caller's registers and FS, GS and FPU state. Only threads so far: fork
+     * is still the way to a new process.
+     */
+    private static long clone(long frame, long flags, long stack, long parentTid, long childTid, long tls) {
+        Process self = Process.current();
+        if (self == null) {
+            return -ENOSYS;
+        }
+        long allowed = CLONE_THREAD_FLAGS | CLONE_SYSVSEM | CLONE_SETTLS | CLONE_PARENT_SETTID
+                | CLONE_CHILD_CLEARTID | CLONE_DETACHED | CLONE_CHILD_SETTID;
+        if ((flags & CLONE_THREAD_FLAGS) != CLONE_THREAD_FLAGS || (flags & ~allowed) != 0 || stack == 0) {
+            return -EINVAL;
+        }
+        if ((flags & CLONE_PARENT_SETTID) != 0 && !userWritable(parentTid, 4)
+                || (flags & (CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID)) != 0 && !userWritable(childTid, 4)) {
+            return -EFAULT;
+        }
+        if ((flags & CLONE_SETTLS) != 0 && (tls < 0 || tls >= AddressSpace.END)) {
+            return -EPERM;
+        }
+        long[] registers = new long[Frame.REGISTERS.length];
+        for (int i = 0; i < registers.length; i++) {
+            registers[i] = Frame.register(frame, i);
+        }
+        registers[Frame.RAX] = 0;
+        UserState state = UserState.copyOfThisCpu();
+        if ((flags & CLONE_SETTLS) != 0) {
+            state.setFsBase(tls);
+        }
+        long clearTid = (flags & CLONE_CHILD_CLEARTID) != 0 ? childTid : 0;
+        // syscall left the return address in rcx.
+        Process.Runner thread = self.newThread(Frame.register(frame, Frame.RCX), stack, registers, state, clearTid);
+        if (thread == null) {
+            return -EAGAIN;
+        }
+        // Before it starts, so the new thread finds its tid already there.
+        if ((flags & CLONE_PARENT_SETTID) != 0) {
+            Magic.pokeInt(parentTid, thread.tid);
+        }
+        if ((flags & CLONE_CHILD_SETTID) != 0) {
+            Magic.pokeInt(childTid, thread.tid);
+        }
+        thread.start();
+        return thread.tid;
+    }
+
+    /** WAIT, with a relative timeout or none, and WAKE. Private or not, a futex is a word of this process. */
+    private static long futex(long address, long op, long value, long timeout) {
+        int command = (int) op & ~FUTEX_PRIVATE_FLAG;
+        if ((address & 3) != 0 || !userReadable(address, 4)) {
+            return -EFAULT;
+        }
+        if (command == FUTEX_WAKE) {
+            return Futex.wake(Scheduler.addressSpace(), address, (int) Math.min(value, Integer.MAX_VALUE));
+        }
+        if (command != FUTEX_WAIT) {
+            return -ENOSYS;
+        }
+        long timeoutNanos = -1;
+        if (timeout != 0) {
+            if (!userReadable(timeout, 16)) {
+                return -EFAULT;
+            }
+            long seconds = Magic.peekLong(timeout);
+            long nanos = Magic.peekLong(timeout + 8);
+            if (seconds < 0 || nanos < 0 || nanos >= 1_000_000_000L) {
+                return -EINVAL;
+            }
+            timeoutNanos = seconds >= Long.MAX_VALUE / 1_000_000_000L ? Long.MAX_VALUE : seconds * 1_000_000_000L + nanos;
+        }
+        return Futex.wait(Scheduler.addressSpace(), address, (int) value, timeoutNanos);
+    }
+
+    /**
      * Loads the new image into a fresh address space first, so a failure returns an error to the
      * old one. Returns 0 once the new one is ready for the caller to switch to.
      */
@@ -265,6 +379,10 @@ public final class SystemCalls {
         Process self = Process.current();
         if (self == null) {
             return -ENOSYS;
+        }
+        // Linux ends the other threads first. Until that's needed, the caller has to.
+        if (!self.singleThreaded()) {
+            return -EAGAIN;
         }
         String path = userString(pathAddress);
         String[] argv = userStrings(argvAddress);

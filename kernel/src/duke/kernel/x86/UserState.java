@@ -54,6 +54,11 @@ public final class UserState {
         return s;
     }
 
+    /** For clone's CLONE_SETTLS: the new thread's FS base. */
+    public void setFsBase(long base) {
+        fsBase = base;
+    }
+
     /** Copies the CPU's user state here. Interrupts must be off. */
     public void save() {
         fsBase = Magic.readMsr(IA32_FS_BASE);
