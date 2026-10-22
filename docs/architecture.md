@@ -303,20 +303,30 @@ the output compared to node's.
 Java programs run in ring 3 too. `dukec --user` builds one into a static executable linked at
 0x400000 that runs unchanged on Linux and on Duke. Its `_start` points GS at the CPU block with
 `arch_prctl(ARCH_SET_GS)` instead of writing the MSR, switches to a stack in its own bss, and calls
-`exit_group(0)` once `main` returns. The program's `java.base` is the kernel's `java.*` and
+`exit_group(0)` once `main` and every other thread have returned. The program's `java.base` is the kernel's `java.*` and
 `duke.rt`, with the five `duke.kernel` classes they call (`Console`, `Panic`, `Scheduler`,
-`Monitors`, `Smp`) swapped for single-threaded versions in `user/src` that talk to the kernel
-through `Magic.syscall`. Nothing in the runtime knows which one it got. A user program has one
-thread for now. Before any class initializer, `_start` calls `UserRuntime.init`, which `mmap`s
+`Monitors`, `Smp`) swapped for versions in `user/src` that talk to the kernel
+through `Magic.syscall`. Nothing in the runtime knows which one it got. Before any class initializer, `_start` calls `UserRuntime.init`, which `mmap`s
 1 GiB for the heap plus its mark bits and mark stack, and hands them to `Heap.growInto` as the
 kernel's `KernelHeap` does with page tables. Both Linux and Duke fill those pages in as they're
 first touched, so the backing's commit has nothing to do, and the collector runs exactly as in
-the kernel, with no other threads to stop. `main` may take `String[] args` or nothing, as on
+the kernel, with no other threads to stop: one that starts while other threads are running
+panics, until the collector can stop them. `main` may take `String[] args` or nothing, as on
 HotSpot. If it takes them, `_start` calls `UserRuntime.arguments` after the initializers have run,
 which builds them from the argv Linux's initial stack layout left, decoding UTF-8 into our Latin-1
 strings. `System.err` writes to fd 2. An exception that leaves `main` goes to `Panic.uncaught`,
 which the kernel turns into a panic and a user program into HotSpot's `Exception in thread "main"`
 report, minus the frames that aren't Java (`_start`), and exit status 1.
+`Thread.start` is `clone` with `CLONE_VM | CLONE_THREAD` and the rest of what pthreads passes,
+through `Magic.cloneThread`. The new thread comes back from the syscall on a stack its parent
+`mmap`ped, where the parent's frame isn't, so the intrinsic sends it straight to dukec's thread
+entry: `arch_prctl(ARCH_SET_GS)` at the CPU block above that stack, `Scheduler.threadMain`, then
+`exit`. A thread's block index is its slot, which is what the heap lock records its holder by.
+The kernel schedules the threads, so the user `Scheduler` only keeps the books, and `Monitors` is
+the kernel's, with a futex where the kernel switches threads: a thread that blocks or waits parks
+on a futex word of its own, and whoever hands it the monitor unparks it. The scheduler lock is a
+futex lock too. There's no `munmap` yet, so a slot is reused once the kernel has cleared its
+`CLONE_CHILD_CLEARTID` word.
 `make user-test` runs each program in `tests/user` on HotSpot, on Linux and on Duke and compares
 the three.
 

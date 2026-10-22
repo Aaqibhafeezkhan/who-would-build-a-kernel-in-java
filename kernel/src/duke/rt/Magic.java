@@ -212,6 +212,12 @@ public final class Magic {
     /** A Linux system call from ring 3: the result, or a negated errno. */
     public static native long syscall(long number, long a0, long a1, long a2, long a3, long a4, long a5);
 
+    /**
+     * clone(2) for a new thread of a user program, which starts at the compiler's thread entry on
+     * {@code stack}, whose top word must be its CPU block. Returns the new thread's tid, or a negated errno.
+     */
+    public static native long cloneThread(long flags, long stack, long parentTid, long childTid);
+
     public static native void halt();
 
     public static native void disableInterrupts();

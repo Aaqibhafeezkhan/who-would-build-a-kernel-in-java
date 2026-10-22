@@ -104,6 +104,7 @@ public final class Compiler {
     /** A user program runs on a stack in its own image rather than the one exec gave it, like the kernel. */
     private static final int USER_STACK_SIZE = 1024 * 1024;
     private static final int SYS_ARCH_PRCTL = 158;
+    private static final int SYS_EXIT = 60;
     private static final int SYS_EXIT_GROUP = 231;
     private static final int ARCH_SET_GS = 0x1001;
 
@@ -132,6 +133,7 @@ public final class Compiler {
     private boolean syscallEntry;
     private boolean stackOverflowStub;
     private boolean apEntry;
+    private boolean userThreadEntry;
     private final Map<String, LineInfo> lineInfo = new LinkedHashMap<>();
 
     private record LineInfo(String sourceFile, List<int[]> lines) {}
@@ -160,6 +162,7 @@ public final class Compiler {
     private boolean user;
     private String userRuntimeInit;
     private String userRuntimeArguments;
+    private String userRuntimeFinish;
 
     public Compiler(ClassPool pool) {
         this.pool = pool;
@@ -240,6 +243,7 @@ public final class Compiler {
         if (user) {
             requireClass(USER_RUNTIME);
             userRuntimeInit = requireMethod(USER_RUNTIME, "init", "(J)V");
+            userRuntimeFinish = requireMethod(USER_RUNTIME, "finish", "()V");
             if (mainTakesArguments) {
                 userRuntimeArguments = requireMethod(USER_RUNTIME, "arguments", "()[Ljava/lang/String;");
             }
@@ -266,6 +270,9 @@ public final class Compiler {
         }
         if (apEntry) {
             emitApEntry();
+        }
+        if (userThreadEntry) {
+            emitUserThreadEntry();
         }
         if (user) {
             emitUserStartStub(entryClass, mainSymbol);
@@ -739,6 +746,39 @@ public final class Compiler {
 
     String requireThreadEntry() {
         return requireMethod("duke/kernel/Scheduler", "threadMain", "()V");
+    }
+
+    /** Where a user program's new thread starts (Magic.cloneThread). */
+    static final String USER_THREAD_ENTRY = "thread.entry";
+
+    String requireUserThreadEntry() {
+        if (!userThreadEntry) {
+            userThreadEntry = true;
+            requireThreadEntry();
+        }
+        return USER_THREAD_ENTRY;
+    }
+
+    /**
+     * Where clone returns 0 to a user program's new thread, on the stack its parent mapped, with
+     * the thread's CPU block in the top word. GS goes there first, as in _start, since every
+     * prologue reads it. Then Scheduler.threadMain, and exit, which ends only this thread.
+     */
+    private void emitUserThreadEntry() {
+        Section text = image.text;
+        text.align(16);
+        int start = text.size();
+        X64 a = new X64(text);
+        a.load(8, false, Reg.RSI, Mem.at(Reg.RSP));
+        a.movImm32(Reg.RAX, SYS_ARCH_PRCTL);
+        a.movImm32(Reg.RDI, ARCH_SET_GS);
+        a.syscall();
+        a.alu(X64.Alu.XOR, false, Reg.RBP, Reg.RBP);
+        a.call(methodSymbol("duke/kernel/Scheduler", "threadMain", "()V"));
+        a.movImm32(Reg.RAX, SYS_EXIT);
+        a.alu(X64.Alu.XOR, false, Reg.RDI, Reg.RDI);
+        a.syscall();
+        image.define(USER_THREAD_ENTRY, text, start, text.size() - start, Image.SymbolType.FUNC);
     }
 
     /**
@@ -1247,8 +1287,8 @@ public final class Compiler {
 
     /**
      * _start for a user program: the same steps as the kernel's boot stub, with arch_prctl in place
-     * of the GS MSR, and exit_group(0) once main returns. Linux and Duke both start it with nothing
-     * but rsp set.
+     * of the GS MSR, and exit_group(0) once main and every other thread have returned. Linux and
+     * Duke both start it with nothing but rsp set.
      */
     private void emitUserStartStub(String entryClass, String mainSymbol) {
         image.bss.align(16);
@@ -1301,6 +1341,8 @@ public final class Compiler {
         } else {
             a.call(mainSymbol);
         }
+        // As HotSpot does, the program ends once its other threads have too.
+        a.call(userRuntimeFinish);
         a.movImm32(Reg.RAX, SYS_EXIT_GROUP);
         a.alu(X64.Alu.XOR, false, Reg.RDI, Reg.RDI);
         a.syscall();

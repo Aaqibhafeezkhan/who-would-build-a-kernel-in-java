@@ -5,7 +5,7 @@ import duke.rt.Magic;
 
 /**
  * What a user program's _start runs before any class initializer: moves the heap into memory from
- * mmap. Then, if main takes them, the program's arguments.
+ * mmap and makes main's Thread. Then, if main takes them, the program's arguments.
  */
 public final class UserRuntime {
 
@@ -29,6 +29,12 @@ public final class UserRuntime {
         long markStack = map(HEAP_BYTES / 2);
         // The reservations are already zero-filled on demand, so committing has nothing to do.
         Heap.growInto(heap, heap + HEAP_BYTES, marks, markStack, (address, bytes) -> true);
+        Scheduler.init();
+    }
+
+    /** What _start runs once main returns, before exit_group. */
+    public static void finish() {
+        Scheduler.awaitOthers();
     }
 
     /** argv without argv[0], as HotSpot passes main. */

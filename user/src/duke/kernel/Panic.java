@@ -34,9 +34,19 @@ public final class Panic {
         Console.writeTo(Console.STDERR, line.toString(), true);
     }
 
-    /** An exception that left main, reported as HotSpot does: on stderr, then exit status 1. */
+    /**
+     * An exception that left main, reported as HotSpot does: on stderr, then exit status 1 once
+     * the other threads are done.
+     */
     public static void uncaught(Throwable exception) {
-        StringBuilder report = new StringBuilder("Exception in thread \"main\" ");
+        report("main", exception);
+        Scheduler.awaitOthers();
+        haltForever();
+    }
+
+    /** An exception that left a thread, on stderr as HotSpot reports it. */
+    static void report(String thread, Throwable exception) {
+        StringBuilder report = new StringBuilder("Exception in thread \"").append(thread).append("\" ");
         report.append(exception.toString());
         appendFrames(report, exception);
         for (Throwable cause = exception.getCause(); cause != null; cause = cause.getCause()) {
@@ -44,7 +54,6 @@ public final class Panic {
             appendFrames(report, cause);
         }
         Console.writeTo(Console.STDERR, report.toString(), true);
-        haltForever();
     }
 
     private static void appendFrames(StringBuilder report, Throwable exception) {

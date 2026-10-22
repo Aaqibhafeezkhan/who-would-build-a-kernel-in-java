@@ -1,6 +1,6 @@
 package duke.kernel;
 
-/** One thread, so the collector has nobody to stop. */
+/** The collector doesn't stop a user program's other threads yet, so it refuses to run alongside them. */
 public final class Smp {
 
     private Smp() {
@@ -11,6 +11,9 @@ public final class Smp {
     }
 
     public static void stopOthers() {
+        if (Scheduler.othersAlive()) {
+            Panic.panic("a collection with other threads running isn't supported yet");
+        }
     }
 
     public static void resumeOthers() {

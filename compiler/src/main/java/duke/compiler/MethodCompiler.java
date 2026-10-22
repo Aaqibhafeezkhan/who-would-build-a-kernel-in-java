@@ -1122,6 +1122,23 @@ final class MethodCompiler {
                 a.lea(RAX, Mem.rip(program.requireApEntry()));
                 pushLong(RAX);
             }
+            case "cloneThread" -> {
+                // cloneThread(flags, stack, parentTid, childTid): the child comes back from the
+                // syscall on its new stack, with no frame here, so it leaves for the thread entry.
+                X64.Label parent = new X64.Label();
+                popLong(Reg.R10);
+                popLong(RDX);
+                popLong(RSI);
+                popLong(Reg.RDI);
+                a.alu(Alu.XOR, false, Reg.R8, Reg.R8);
+                a.movImm32(RAX, CLONE);
+                a.syscall();
+                a.test(true, RAX, RAX);
+                a.jcc(Cond.NE, parent);
+                a.jmp(program.requireUserThreadEntry());
+                a.bind(parent);
+                pushLong(RAX);
+            }
             case "threadEntry" -> {
                 a.lea(RAX, Mem.rip(program.requireThreadEntry()));
                 pushLong(RAX);
@@ -1226,6 +1243,7 @@ final class MethodCompiler {
     }
 
     private static final int INTERRUPT_FLAG = 0x200;
+    private static final int CLONE = 56;
 
     /** Where this CPU switches to on an interrupt or system call from ring 3: the TSS's rsp0 and the CPU block. */
     private void setKernelStack(Reg top) {

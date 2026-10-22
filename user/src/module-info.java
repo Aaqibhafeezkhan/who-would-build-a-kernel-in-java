@@ -1,6 +1,6 @@
 /**
  * java.base for a Java program in ring 3: the kernel's java.lang, java.util and runtime, with the
- * few duke.kernel classes they call replaced by single-threaded ones built on Linux system calls.
+ * few duke.kernel classes they call replaced by ones built on Linux system calls.
  */
 module java.base {
     exports java.io;
