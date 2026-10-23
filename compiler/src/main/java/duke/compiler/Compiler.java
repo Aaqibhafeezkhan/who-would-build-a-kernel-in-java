@@ -55,6 +55,13 @@ public final class Compiler {
     private static final Reg[] SAVED_REGISTERS = {
             Reg.RAX, Reg.RCX, Reg.RDX, Reg.RBX, Reg.RBP, Reg.RSI, Reg.RDI,
             Reg.R8, Reg.R9, Reg.R10, Reg.R11, Reg.R12, Reg.R13, Reg.R14, Reg.R15};
+    /** fxsave's area, which the entry stubs put below the frame; duke.kernel.x86.Frame.fpuState finds it. */
+    static final int FPU_STATE_BYTES = 512;
+    private static final String DEFAULT_MXCSR = "fpu.mxcsr";
+    private static final long CR0_MP = 1 << 1;
+    private static final long CR0_EM = 1 << 2;
+    private static final long CR4_OSFXSR = 1 << 9;
+    private static final long CR4_OSXMMEXCPT = 1 << 10;
 
     /**
      * Each CPU's own block, which GS points at (IA32_GS_BASE). Layout: the block's own address, the
@@ -730,6 +737,7 @@ public final class Compiler {
         a.writeCr(3, Reg.RAX);
         a.load(8, false, Reg.RSP, Mem.at(Reg.RBX, CPU_STACK_TOP));
         a.alu(X64.Alu.XOR, false, Reg.RBP, Reg.RBP);
+        enableFpu(a);
         a.mov(Reg.RAX, Reg.RBX);
         a.mov(Reg.RDX, Reg.RBX);
         a.shiftImm(X64.Shift.SHR, true, Reg.RDX, 32);
@@ -824,6 +832,49 @@ public final class Compiler {
         image.define(STACK_OVERFLOW, text, start, text.size() - start, Image.SymbolType.FUNC);
     }
 
+    /**
+     * Lets this CPU run SSE (Limine leaves CR4.OSFXSR clear, so every SSE instruction raises #UD),
+     * reporting its exceptions as #XM, then resets the x87 and SSE control words. Before any Java,
+     * since a class initializer may already compute with floats.
+     */
+    private void enableFpu(X64 a) {
+        a.readCr(0, Reg.RAX);
+        a.aluImm(X64.Alu.AND, true, Reg.RAX, (int) ~CR0_EM);
+        a.aluImm(X64.Alu.OR, true, Reg.RAX, (int) CR0_MP);
+        a.writeCr(0, Reg.RAX);
+        a.readCr(4, Reg.RAX);
+        a.aluImm(X64.Alu.OR, true, Reg.RAX, (int) (CR4_OSFXSR | CR4_OSXMMEXCPT));
+        a.writeCr(4, Reg.RAX);
+        resetFpu(a);
+    }
+
+    /** Round to nearest and every exception masked, which Java's arithmetic needs. */
+    private void resetFpu(X64 a) {
+        a.fninit();
+        a.ldmxcsr(Mem.rip(DEFAULT_MXCSR));
+    }
+
+    /**
+     * From an entry stub, with the frame's address in rax: saves the x87 and SSE state below the
+     * frame and resets it, so the handler's Java computes with Java's rounding and leaves whatever
+     * it interrupted intact. That can be ring 3, with every register and its own MXCSR, or Java
+     * partway through a bytecode, between loading xmm0 and storing it back. Leaves rsp at the
+     * save area, with the frame's address in the slot above it.
+     */
+    private void saveFpu(X64 a) {
+        a.aluImm(X64.Alu.SUB, true, Reg.RSP, FPU_STATE_BYTES + 16);
+        a.aluImm(X64.Alu.AND, true, Reg.RSP, -16);
+        a.store(8, Mem.at(Reg.RSP, FPU_STATE_BYTES), Reg.RAX);
+        a.fxsave(Mem.at(Reg.RSP));
+        resetFpu(a);
+    }
+
+    /** Undoes {@link #saveFpu}, leaving rsp at the frame. */
+    private void restoreFpu(X64 a) {
+        a.fxrstor(Mem.at(Reg.RSP));
+        a.load(8, false, Reg.RSP, Mem.at(Reg.RSP, FPU_STATE_BYTES));
+    }
+
     String requireInterruptStubs() {
         if (!interruptStubs) {
             interruptStubs = true;
@@ -833,8 +884,9 @@ public final class Compiler {
     }
 
     /**
-     * One entry stub per vector, then a common path that saves every general-purpose register,
-     * calls the Java dispatcher with the frame address, restores and returns with iretq. From
+     * One entry stub per vector, then a common path that saves every general-purpose register and
+     * the FPU ({@link #saveFpu}), calls the Java dispatcher with the frame address, restores and
+     * returns with iretq. From
      * ring 3 it swaps GS in and out around that, so the kernel's per-CPU block is GS throughout.
      * Frame layout from the address passed: r15 ... rax (15 slots, r15 lowest), vector, error code,
      * then the CPU's rip, cs, rflags, rsp, ss.
@@ -861,10 +913,12 @@ public final class Compiler {
         a.lea(Reg.RBP, Mem.at(Reg.RSP, 8 * SAVED_REGISTERS.length + 56));
         a.bind(fromKernel);
         a.mov(Reg.RAX, Reg.RSP);
+        saveFpu(a);
         a.push(Reg.RAX);
         a.push(Reg.RAX);
         a.call(methodSymbol(INTERRUPTS, "dispatch", "(J)V"));
         a.aluImm(X64.Alu.ADD, true, Reg.RSP, 16);
+        restoreFpu(a);
         for (int i = SAVED_REGISTERS.length - 1; i >= 0; i--) {
             a.pop(SAVED_REGISTERS[i]);
         }
@@ -916,7 +970,7 @@ public final class Compiler {
     /**
      * Where the syscall instruction lands (IA32_LSTAR), still on the user's stack and GS with
      * interrupts masked. Swaps in the kernel's GS, moves to the kernel stack top Magic.enterUser recorded, saves the user's rsp and every
-     * general-purpose register in the interrupt frame's order, and calls
+     * general-purpose register in the interrupt frame's order, then the FPU, and calls
      * duke.kernel.user.SystemCalls.dispatch with the frame address. rcx holds the user's rip and r11
      * its rflags, which sysretq restores. sysretq trusts rcx: it's the address after a syscall
      * instruction, which is canonical as long as nothing maps the lower half's last page.
@@ -935,10 +989,12 @@ public final class Compiler {
         }
         a.lea(Reg.RBP, Mem.at(Reg.RSP, 8 * SAVED_REGISTERS.length + 8));
         a.mov(Reg.RAX, Reg.RSP);
+        saveFpu(a);
         a.push(Reg.RAX);
         a.push(Reg.RAX);
         a.call(methodSymbol(SYSTEM_CALLS, "dispatch", "(J)V"));
         a.aluImm(X64.Alu.ADD, true, Reg.RSP, 16);
+        restoreFpu(a);
         for (int i = SAVED_REGISTERS.length - 1; i >= 0; i--) {
             a.pop(SAVED_REGISTERS[i]);
         }
@@ -1351,6 +1407,11 @@ public final class Compiler {
 
     /** Switches to our own stack, initializes the entry class, then calls the entry point. */
     private void emitBootStub(String entryClass, String mainSymbol) {
+        image.rodata.align(4);
+        int mxcsr = image.rodata.size();
+        image.rodata.emit32(0x1F80);
+        image.define(DEFAULT_MXCSR, image.rodata, mxcsr, 4, Image.SymbolType.OBJECT);
+
         // A page of nothing below the stack, which the kernel unmaps: running off the stack faults.
         image.bss.align(4096);
         int guard = image.bss.size();
@@ -1371,6 +1432,7 @@ public final class Compiler {
         X64 a = new X64(text);
         a.lea(Reg.RSP, Mem.rip("boot.stack", BOOT_STACK_SIZE));
         a.alu(X64.Alu.XOR, false, Reg.RBP, Reg.RBP);
+        enableFpu(a);
         // GS before any Java runs: every prologue reads the stack limit through it.
         a.lea(Reg.RAX, Mem.rip(BSP_CPU_BLOCK));
         a.mov(Reg.RDX, Reg.RAX);

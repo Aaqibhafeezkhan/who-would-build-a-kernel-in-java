@@ -27,7 +27,7 @@ final class ForkTest {
     }
 
     /**
-     * jmp over the child's code to the parent's, which sets rbx and FS, forks, and goes to the
+     * jmp over the child's code to the parent's, which sets rbx, xmm5, MXCSR and FS, forks, and goes to the
      * child's code when fork returns 0. The parent then waits for the child and parks.
      */
     private static byte[] forkAndWait(Program p, Code child, long[] status) throws InterruptedException {
@@ -39,6 +39,8 @@ final class ForkTest {
         int start = c.position();
         c.at(1).imm32(start - 5).at(start);
         c.b(0x48, 0xC7, 0xC3).imm32(7);                                    // mov rbx, 7
+        Magic.pokeInt(p.kernelView(480), 0x7F80);
+        c.xmmFromRbx(5).ldmxcsr(p.data + 480);                             // round toward zero
         c.archPrctl(SystemCalls.ARCH_SET_FS, p.data + 256);
         c.call(SystemCalls.FORK, 0, 0, 0, p.data);
         c.b(0x48, 0x85, 0xC0).jcc(0x4, childAt);                            // test rax, rax; je child
@@ -65,6 +67,19 @@ final class ForkTest {
         assertEquals(7, peekLong(page, 24), "the parent's rbx after fork");
         assertEquals(42, peekLong(page, 32), "the parent's FS base after fork");
         assertEquals(0, page[512], "the child's write stayed in the child");
+    }
+
+    // From the parent's system call frame, not the CPU, where the kernel's own state is by then.
+    static void testChildGetsTheParentsFpuState() throws InterruptedException {
+        Program p = new Program();
+        Code child = new Code().stmxcsr(p.data + 488)
+                .b(0x8B, 0x0C, 0x25).imm32(p.data + 488)                   // mov ecx, [data + 488]
+                .b(0xC1, 0xE9, 0x09).b(0x83, 0xE1, 0x30)                   // shr ecx, 9; and ecx, 0x30
+                .raxFromXmm(5).b(0x01, 0xC8).exitWithResult();             // exit(xmm5 + ecx)
+        long[] status = new long[1];
+        byte[] page = forkAndWait(p, child, status);
+        assertEquals(peekLong(page, 0), peekLong(page, 16), "wait4 collected the child");
+        assertEquals((0x30 + 7) << 8, (int) peekLong(page, 8), "the child saw rounding toward zero and xmm5 = 7");
     }
 
     static void testChildExecsHello() throws InterruptedException {

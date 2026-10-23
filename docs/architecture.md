@@ -15,8 +15,10 @@
 Everything after step 2 is compiled Java except the dozen instructions of `_start`.
 
 At entry, interrupts are disabled and there is no IDT, so a fault before `Idt.load()` triple-faults
-(QEMU, run with `-no-reboot`, then exits). SSE is disabled (Limine clears CR4 bits it doesn't
-need), so the compiler emits no SSE instructions.
+(QEMU, run with `-no-reboot`, then exits). Limine leaves `CR4.OSFXSR` clear, which makes every SSE
+instruction raise #UD, so `_start` (and each application processor's entry) sets it and
+`OSXMMEXCPT` before any Java, and resets MXCSR and the x87 control word to round to nearest with
+every exception masked, which is what Java's arithmetic needs.
 
 ## Interrupts
 
@@ -222,12 +224,16 @@ uses Linux's numbers and registers (the list is below). `read` and `write` check
 buffer is mapped for ring 3 first. Ring 3 can load its own GS (one `mov gs` used to
 take the machine down), so both entry paths and `enterUser` `swapgs` at the boundary.
 
-Each thread in ring 3 has a `UserState`: its FS and GS bases (set with `arch_prctl`) and its x87
-and SSE registers, none of which kernel code touches. They stay in the CPU while the thread runs,
-the user's GS base in `IA32_KERNEL_GS_BASE`, and `switchTo` saves them (`fxsave`, `rdmsr`) when it
-switches a user thread out and loads them when it switches one in. Every `run` starts from zero bases and the reset FPU state. Limine leaves `CR4.OSFXSR`
-clear, which makes every SSE instruction raise #UD, so each CPU sets it (and `OSXMMEXCPT`) along
-with the syscall MSRs. AVX stays off: `XCR0` is never set, so a libc checking CPUID won't use it.
+Each thread in ring 3 has a `UserState`: its FS and GS bases (set with `arch_prctl`). They stay in
+the CPU while the thread runs, the user's GS base in `IA32_KERNEL_GS_BASE`, and `switchTo` saves
+them (`rdmsr`) when it switches a user thread out and loads them when it switches one in. Every
+`run` starts from zero bases and the reset FPU state. The x87 and SSE registers are saved by both
+entry stubs instead (`fxsave`, below the frame), which then reset MXCSR and the x87 control word
+for the kernel's Java and put the user's back on the way out: the kernel's own code may compute
+with floats, and the user's rounding mode mustn't change its results. The same save covers Java
+interrupted partway through a bytecode with a value in xmm0. A fork or a new thread starts from
+the copy below its parent's syscall frame, not from the CPU. AVX stays off: `XCR0` is never set,
+so a libc checking CPUID won't use it.
 
 The return address in that record is a safepoint. Both entry stubs point rbp at the record, so the
 collector and the unwinder walk from a handler straight into `run`'s frame and on up. User code

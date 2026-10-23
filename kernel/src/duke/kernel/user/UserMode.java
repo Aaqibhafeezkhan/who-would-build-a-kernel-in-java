@@ -65,9 +65,8 @@ public final class UserMode {
     private UserMode() {
     }
 
-    /** The syscall instruction's MSRs and SSE, which each CPU has its own copy of. */
+    /** The syscall instruction's MSRs, which each CPU has its own copy of. */
     public static void initOnThisCpu() {
-        UserState.initOnThisCpu();
         Magic.writeMsr(IA32_EFER, Magic.readMsr(IA32_EFER) | EFER_SYSCALL);
         Magic.writeMsr(IA32_STAR, (long) Gdt.USER_BASE << 48 | (long) Gdt.KERNEL_CODE << 32);
         Magic.writeMsr(IA32_LSTAR, Magic.syscallEntry());
@@ -96,6 +95,7 @@ public final class UserMode {
         Scheduler.setAddressSpace(space);
         Scheduler.setUserState(state);
         state.load();
+        state.loadFpu();
         long status = registers == null ? Magic.enterUser(entry, stack)
                 : Magic.enterUserWith(entry, stack, Magic.addressOf(registers) + Tib.ARRAY_DATA);
         Scheduler.setUserState(null);

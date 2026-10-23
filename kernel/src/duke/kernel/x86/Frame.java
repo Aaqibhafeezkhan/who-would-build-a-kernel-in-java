@@ -28,8 +28,15 @@ public final class Frame {
     private static final int CS = 144;
     private static final int RFLAGS = 152;
     private static final int RSP = 160;
+    /** Compiler.FPU_STATE_BYTES. */
+    public static final int FPU_STATE_BYTES = 512;
 
     private Frame() {
+    }
+
+    /** Where the entry stub saved the interrupted code's x87 and SSE state (Compiler.saveFpu). */
+    public static long fpuState(long frame) {
+        return (frame - FPU_STATE_BYTES - 16) & -16;
     }
 
     public static long register(long frame, int index) {

@@ -398,6 +398,17 @@ public final class X64 {
         memOp(true, false, 1, address, 0, 0x0F, 0xAE);
     }
 
+    /** {@code ldmxcsr [m]}. */
+    public void ldmxcsr(Mem address) {
+        memOp(false, false, 2, address, 0, 0x0F, 0xAE);
+    }
+
+    /** {@code fninit}: the x87 control word as the CPU resets it, and an empty register stack. */
+    public void fninit() {
+        out.emit8(0xDB);
+        out.emit8(0xE3);
+    }
+
     public void rdmsr() {
         out.emit8(0x0F);
         out.emit8(0x32);

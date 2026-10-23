@@ -293,7 +293,7 @@ public final class SystemCalls {
         // syscall left the return address in rcx.
         long rip = Frame.register(frame, Frame.RCX);
         long rsp = Magic.peekLong(frame + USER_RSP);
-        return Process.fork(self, space, rip, rsp, registers, UserState.copyOfThisCpu()).pid;
+        return Process.fork(self, space, rip, rsp, registers, UserState.copyOf(frame)).pid;
     }
 
     /**
@@ -323,7 +323,7 @@ public final class SystemCalls {
             registers[i] = Frame.register(frame, i);
         }
         registers[Frame.RAX] = 0;
-        UserState state = UserState.copyOfThisCpu();
+        UserState state = UserState.copyOf(frame);
         if ((flags & CLONE_SETTLS) != 0) {
             state.setFsBase(tls);
         }

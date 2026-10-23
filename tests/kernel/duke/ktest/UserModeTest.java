@@ -185,6 +185,14 @@ final class UserModeTest {
             return movEax(SystemCalls.ARCH_PRCTL).movEdi(code).movRsi(address).syscall();
         }
 
+        Code ldmxcsr(long address) {
+            return b(0x0F, 0xAE, 0x14, 0x25).imm32(address);
+        }
+
+        Code stmxcsr(long address) {
+            return b(0x0F, 0xAE, 0x1C, 0x25).imm32(address);
+        }
+
         /** movq xmm{n}, rbx */
         Code xmmFromRbx(int n) {
             return b(0x66, n < 8 ? 0x48 : 0x4C, 0x0F, 0x6E, 0xC3 | (n & 7) << 3);
@@ -619,7 +627,32 @@ final class UserModeTest {
                 "through xmm3");
     }
 
-    // Thread i keeps i's value in all sixteen xmm registers and at fs:[8] and gs:[8], with bases
+    // The entry stubs reset MXCSR and the x87 control word for the kernel's Java: both have to
+    // come back as the program left them.
+    static void testFpuControlWordsSurviveSystemCalls() {
+        Program p = new Program();
+        Magic.pokeInt(p.kernelView(8), 0x7F80);
+        Magic.pokeShort(p.kernelView(12), (short) 0x027F);
+        Code c = new Code().b(0xE9).imm32(12);
+        int bad = c.position();
+        c.exit(1);
+        c.ldmxcsr(p.data + 8).b(0xD9, 0x2C, 0x25).imm32(p.data + 12);      // fldcw [data + 12]
+        c.movEax(SystemCalls.GETPID).syscall();
+        c.stmxcsr(p.data + 16).b(0xD9, 0x3C, 0x25).imm32(p.data + 20);     // fnstcw [data + 20]
+        c.b(0x8B, 0x04, 0x25).imm32(p.data + 16);                          // mov eax, [data + 16]
+        c.b(0x3B, 0x04, 0x25).imm32(p.data + 8).jcc(0x5, bad);             // cmp eax, [data + 8]; jne bad
+        c.b(0x0F, 0xB7, 0x04, 0x25).imm32(p.data + 20);                    // movzx eax, word [data + 20]
+        c.b(0x3D).imm32(0x027F).jcc(0x5, bad);                             // cmp eax, 0x27f; jne bad
+        c.exit(0);
+        p.load(c);
+        try {
+            assertEquals(0, p.run(), "MXCSR and the x87 control word after getpid");
+        } finally {
+            p.free();
+        }
+    }
+
+    // Thread i keeps i's value in all sixteen xmm registers and at fs:[8] and gs:[8], its own MXCSR, with bases
     // that differ per thread, while more threads than CPUs are preempted and moved around. Any
     // state that isn't saved and restored with the thread shows up as another thread's value.
     static void testUserStateFollowsTheThread() throws InterruptedException {
@@ -634,6 +667,8 @@ final class UserModeTest {
             long gs = fs + 32;
             Magic.pokeLong(p.kernelView(64 * (i + 1) + 8), value);
             Magic.pokeLong(p.kernelView(64 * (i + 1) + 32 + 8), value);
+            // A rounding mode other than the default, with flush-to-zero on for half of them.
+            Magic.pokeInt(p.kernelView(64 * (i + 1) + 16), 0x1F80 | (i % 3 + 1) << 13 | (i >= 3 ? 0x8000 : 0));
             Code c = new Code().b(0xE9).imm32(12);
             int bad = c.position();
             c.exit(1);
@@ -642,6 +677,7 @@ final class UserModeTest {
             for (int n = 0; n < 16; n++) {
                 c.xmmFromRbx(n);
             }
+            c.ldmxcsr(fs + 16);
             c.b(0xC6, 0x04, 0x25).imm32(p.data + 1).b(1);                  // started
             int loop = c.position();
             for (int n = 0; n < 16; n++) {
@@ -649,6 +685,8 @@ final class UserModeTest {
             }
             c.b(0x64, 0x48, 0x8B, 0x04, 0x25).imm32(8).b(0x48, 0x39, 0xD8).jcc(0x5, bad);
             c.b(0x65, 0x48, 0x8B, 0x04, 0x25).imm32(8).b(0x48, 0x39, 0xD8).jcc(0x5, bad);
+            c.stmxcsr(fs + 24).b(0x8B, 0x04, 0x25).imm32(fs + 24);          // mov eax, [fs + 24]
+            c.b(0x3B, 0x04, 0x25).imm32(fs + 16).jcc(0x5, bad);             // cmp eax, [fs + 16]; jne bad
             c.b(0xF3, 0x90).b(0x80, 0x3C, 0x25).imm32(p.data).b(0).jcc(0x4, loop);
             c.exit(0);
             p.load(c);
