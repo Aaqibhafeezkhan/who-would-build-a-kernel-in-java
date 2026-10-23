@@ -1090,6 +1090,8 @@ public final class Compiler {
                     case null -> data.emit64(0);
                     case Integer i -> data.emit64(i);
                     case Long l -> data.emit64(l);
+                    case Float v -> data.emit64(Float.floatToRawIntBits(v));
+                    case Double v -> data.emit64(Double.doubleToRawLongBits(v));
                     case String s -> data.emitReloc(Reloc.Kind.ABS64, requireString(s), 0);
                     default -> throw new CompileException("unsupported constant " + initial + " for " + name + "." + f.fieldName());
                 }

@@ -49,6 +49,17 @@ public final class X64 {
         }
     }
 
+    /** Scalar SSE arithmetic: {@code addsd}, {@code addss} and the rest. */
+    public enum Sse {
+        ADD(0x58), MUL(0x59), SUB(0x5C), DIV(0x5E);
+
+        final int opcode;
+
+        Sse(int opcode) {
+            this.opcode = opcode;
+        }
+    }
+
     private final Section out;
 
     public X64(Section out) {
@@ -396,6 +407,53 @@ public final class X64 {
     /** {@code fxrstor64 [m]}. */
     public void fxrstor(Mem address) {
         memOp(true, false, 1, address, 0, 0x0F, 0xAE);
+    }
+
+    /** {@code movq xmm, r}, or {@code movd} for the low 32 bits unless {@code wide}. */
+    public void movToXmm(boolean wide, int xmm, Reg src) {
+        out.emit8(0x66);
+        regOp(wide, false, xmm, src.code(), 0x0F, 0x6E);
+    }
+
+    /** {@code movq r, xmm}, or {@code movd} unless {@code wide}. */
+    public void movFromXmm(boolean wide, Reg dst, int xmm) {
+        out.emit8(0x66);
+        regOp(wide, false, xmm, dst.code(), 0x0F, 0x7E);
+    }
+
+    /** {@code addsd dst, src} and the rest on doubles, or {@code addss} and the rest on floats. */
+    public void sse(Sse op, boolean dbl, int dst, int src) {
+        out.emit8(dbl ? 0xF2 : 0xF3);
+        regOp(false, false, dst, src, 0x0F, op.opcode);
+    }
+
+    /** {@code ucomisd a, b} or {@code ucomiss}: ZF, PF and CF all set if either is NaN. */
+    public void ucomis(boolean dbl, int a, int b) {
+        if (dbl) {
+            out.emit8(0x66);
+        }
+        regOp(false, false, a, b, 0x0F, 0x2E);
+    }
+
+    /** {@code cvtsi2sd xmm, r} or {@code cvtsi2ss}, from all 64 bits if {@code wide}. */
+    public void cvtsi2s(boolean dbl, boolean wide, int xmm, Reg src) {
+        out.emit8(dbl ? 0xF2 : 0xF3);
+        regOp(wide, false, xmm, src.code(), 0x0F, 0x2A);
+    }
+
+    /**
+     * {@code cvttsd2si r, xmm} or {@code cvttss2si}, truncating: NaN and anything out of range
+     * give the most negative value.
+     */
+    public void cvtts2si(boolean dbl, boolean wide, Reg dst, int xmm) {
+        out.emit8(dbl ? 0xF2 : 0xF3);
+        regOp(wide, false, dst.code(), xmm, 0x0F, 0x2C);
+    }
+
+    /** {@code cvtsd2ss dst, src} from a double, or {@code cvtss2sd} from a float. */
+    public void cvts2s(boolean fromDouble, int dst, int src) {
+        out.emit8(fromDouble ? 0xF2 : 0xF3);
+        regOp(false, false, dst, src, 0x0F, 0x5A);
     }
 
     /** {@code ldmxcsr [m]}. */

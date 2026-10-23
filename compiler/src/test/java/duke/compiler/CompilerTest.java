@@ -73,7 +73,7 @@ class CompilerTest {
                 public final class Entry {
                     static int half(int x) {
                         float f = x;
-                        return (int) (f / 2);
+                        return (int) (f % 2);
                     }
                     public static void main() {
                         half(0);
@@ -82,8 +82,8 @@ class CompilerTest {
                 """);
         CompileException e = assertThrows(CompileException.class,
                 () -> new Compiler(ClassPool.load(classes)).compile("duke/test/Entry", "main"));
-        assertEquals("duke/test/Entry.half(I)I (line 4): unsupported conversion i2f"
-                + " (floating point is not supported yet)", e.getMessage());
+        assertEquals("duke/test/Entry.half(I)I (line 5): % on floats and doubles is not supported yet",
+                e.getMessage());
     }
 
     @Test

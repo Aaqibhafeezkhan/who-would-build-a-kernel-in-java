@@ -56,6 +56,15 @@ public final class Magic {
 
     public static native long addressOf(Object object);
 
+    /** The same bits, retyped: floats and doubles are kept as their bits, so these compile to nothing. */
+    public static native long doubleToRawLongBits(double value);
+
+    public static native double longBitsToDouble(long bits);
+
+    public static native int floatToRawIntBits(float value);
+
+    public static native float intBitsToFloat(int bits);
+
     public static native Object toObject(long address);
 
     public static native long heapArenaStart();

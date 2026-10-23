@@ -573,11 +573,16 @@ forms), raw memory access (`peek*`/`poke*`), `addressOf`, `halt`, `disableInterr
 
 Static, instance, virtual and interface methods (including defaults), exceptions, the core of
 `java.util` (collections, `Arrays`, `Comparator`, `java.util.function`), type checks and casts, boxing, string concatenation, lambdas and method references, object and array allocation
-(including multi-dimensional), constructors, int/long/boolean/byte/char/short arithmetic with Java semantics, all control flow
+(including multi-dimensional), constructors, int/long/boolean/byte/char/short/float/double arithmetic with Java semantics, all control flow
 including both switch forms, static and instance fields, array loads and stores, string literals
 and `String.length`/`charAt`.
 
-Not yet, and a clear compile error: floating point.
+Floats and doubles are kept as their bits on the Java stack and in locals, like ints and longs, and
+go through xmm0 and xmm1 only within one bytecode, so calls and thread switches never save them.
+Comparisons give javac's fcmpl/fcmpg answers for NaN, and conversions to int and long saturate,
+with NaN going to 0, where `cvttsd2si` would give the most negative value. Not yet, and a clear
+compile error: `%` on floats and doubles. `Double` and `Float` have only their static methods so
+far, with no boxing or `toString`.
 
 String concatenation works because the kernel compiles with `javac -XDstringConcat=inline`, which
 turns `+` into `StringBuilder` calls instead of an `invokedynamic`. Every place that compiles

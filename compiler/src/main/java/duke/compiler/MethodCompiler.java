@@ -13,6 +13,7 @@ import duke.compiler.asm.Reg;
 import duke.compiler.asm.X64;
 import duke.compiler.asm.X64.Alu;
 import duke.compiler.asm.X64.Shift;
+import duke.compiler.asm.X64.Sse;
 import duke.compiler.image.Image;
 import duke.compiler.image.Section;
 import java.lang.classfile.Attributes;
@@ -316,6 +317,11 @@ final class MethodCompiler {
                 a.movImm64(RAX, v);
                 pushLong(RAX);
             }
+            case Float v -> a.pushImm(Float.floatToRawIntBits(v));
+            case Double v -> {
+                a.movImm64(RAX, Double.doubleToRawLongBits(v));
+                pushLong(RAX);
+            }
             case String s -> {
                 a.lea(RAX, Mem.rip(program.requireString(s)));
                 a.push(RAX);
@@ -327,7 +333,7 @@ final class MethodCompiler {
                 a.lea(RAX, Mem.rip(program.requireTib(name)));
                 a.push(RAX);
             }
-            default -> throw error("unsupported constant " + c.constantValue() + " (floating point is not supported yet)");
+            default -> throw error("unsupported constant " + c.constantValue());
         }
     }
 
@@ -378,6 +384,22 @@ final class MethodCompiler {
                 a.alu(Alu.SUB, false, RAX, RCX);
                 a.push(RAX);
             }
+            case FADD -> floatBinary(Sse.ADD, false);
+            case FSUB -> floatBinary(Sse.SUB, false);
+            case FMUL -> floatBinary(Sse.MUL, false);
+            case FDIV -> floatBinary(Sse.DIV, false);
+            case DADD -> floatBinary(Sse.ADD, true);
+            case DSUB -> floatBinary(Sse.SUB, true);
+            case DMUL -> floatBinary(Sse.MUL, true);
+            case DDIV -> floatBinary(Sse.DIV, true);
+            // Flipping the sign bit is negation for NaN and zeros too, where 0 - x isn't.
+            case FNEG -> a.aluImm(Alu.XOR, false, Mem.at(RSP), Integer.MIN_VALUE);
+            case DNEG -> a.aluImm(Alu.XOR, false, Mem.at(RSP, 12), Integer.MIN_VALUE);
+            case FCMPL -> floatCompare(false, -1);
+            case FCMPG -> floatCompare(false, 1);
+            case DCMPL -> floatCompare(true, -1);
+            case DCMPG -> floatCompare(true, 1);
+            case FREM, DREM -> throw error("% on floats and doubles is not supported yet");
             case ARRAYLENGTH -> {
                 a.pop(RAX);
                 consumed = 1;
@@ -385,7 +407,7 @@ final class MethodCompiler {
                 a.load(4, false, RAX, Mem.at(RAX, Layouts.ARRAY_LENGTH_OFFSET));
                 a.push(RAX);
             }
-            default -> throw error("unsupported operator " + op.name().toLowerCase() + " (floating point is not supported yet)");
+            default -> throw error("unsupported operator " + op.name().toLowerCase());
         }
     }
 
@@ -401,6 +423,48 @@ final class MethodCompiler {
         popLong(RAX);
         a.alu(op, true, RAX, RCX);
         pushLong(RAX);
+    }
+
+    /**
+     * Floats and doubles live on the Java stack and in locals as their bits, like ints and longs.
+     * xmm0 and xmm1 hold them only within one bytecode, so a call or a thread switch never has to
+     * save them; an interrupt in between does (Compiler.saveFpu).
+     */
+    private void popFloat(int xmm, boolean dbl) {
+        popValue(RAX, dbl);
+        a.movToXmm(dbl, xmm, RAX);
+    }
+
+    private void pushFloat(int xmm, boolean dbl) {
+        a.movFromXmm(dbl, RAX, xmm);
+        pushValue(RAX, dbl);
+    }
+
+    private void floatBinary(Sse op, boolean dbl) {
+        popFloat(1, dbl);
+        popFloat(0, dbl);
+        a.sse(op, dbl, 0, 1);
+        pushFloat(0, dbl);
+    }
+
+    /** fcmpl and the rest: -1, 0 or 1, and {@code ifNaN} when either is NaN. */
+    private void floatCompare(boolean dbl, int ifNaN) {
+        popFloat(1, dbl);
+        popFloat(0, dbl);
+        a.alu(Alu.XOR, false, RAX, RAX);
+        a.alu(Alu.XOR, false, RCX, RCX);
+        a.ucomis(dbl, 0, 1);
+        X64.Label unordered = new X64.Label();
+        X64.Label done = new X64.Label();
+        a.jcc(Cond.P, unordered);
+        a.setcc(Cond.A, RAX);
+        a.setcc(Cond.B, RCX);
+        a.alu(Alu.SUB, false, RAX, RCX);
+        a.jmp(done);
+        a.bind(unordered);
+        a.movImm32(RAX, ifNaN);
+        a.bind(done);
+        a.push(RAX);
     }
 
     private void intShift(Shift kind) {
@@ -474,8 +538,55 @@ final class MethodCompiler {
             case I2B -> narrow(() -> a.movsx8(RAX, RAX));
             case I2C -> narrow(() -> a.movzx16(RAX, RAX));
             case I2S -> narrow(() -> a.movsx16(RAX, RAX));
-            default -> throw error("unsupported conversion " + op.name().toLowerCase() + " (floating point is not supported yet)");
+            case I2F, I2D, L2F, L2D -> {
+                boolean wide = op == Opcode.L2F || op == Opcode.L2D;
+                boolean dbl = op == Opcode.I2D || op == Opcode.L2D;
+                popValue(RAX, wide);
+                a.cvtsi2s(dbl, wide, 0, RAX);
+                pushFloat(0, dbl);
+            }
+            case F2D, D2F -> {
+                boolean fromDouble = op == Opcode.D2F;
+                popFloat(0, fromDouble);
+                a.cvts2s(fromDouble, 0, 0);
+                pushFloat(0, !fromDouble);
+            }
+            case F2I -> floatToInteger(false, false);
+            case F2L -> floatToInteger(false, true);
+            case D2I -> floatToInteger(true, false);
+            case D2L -> floatToInteger(true, true);
+            default -> throw error("unsupported conversion " + op.name().toLowerCase());
         }
+    }
+
+    /**
+     * cvttsd2si and friends give the most negative value for NaN and for anything out of range;
+     * Java wants 0 for NaN and the nearest bound otherwise. The bits stay in rcx for the sign.
+     */
+    private void floatToInteger(boolean dbl, boolean wide) {
+        popValue(RCX, dbl);
+        a.movToXmm(dbl, 0, RCX);
+        a.cvtts2si(dbl, wide, RAX, 0);
+        X64.Label done = new X64.Label();
+        if (wide) {
+            a.movImm64(RDX, Long.MIN_VALUE);
+            a.alu(Alu.CMP, true, RAX, RDX);
+        } else {
+            a.aluImm(Alu.CMP, false, RAX, Integer.MIN_VALUE);
+        }
+        a.jcc(Cond.NE, done);
+        X64.Label nan = new X64.Label();
+        a.ucomis(dbl, 0, 0);
+        a.jcc(Cond.P, nan);
+        a.test(dbl, RCX, RCX);
+        a.jcc(Cond.S, done);
+        // MIN_VALUE - 1 wraps to MAX_VALUE.
+        a.aluImm(Alu.SUB, wide, RAX, 1);
+        a.jmp(done);
+        a.bind(nan);
+        a.alu(Alu.XOR, false, RAX, RAX);
+        a.bind(done);
+        pushValue(RAX, wide);
     }
 
     private void narrow(Runnable extend) {
@@ -924,6 +1035,7 @@ final class MethodCompiler {
                 a.pop(RAX);
                 pushLong(RAX);
             }
+            case "doubleToRawLongBits", "longBitsToDouble", "floatToRawIntBits", "intBitsToFloat" -> { }
             case "toObject" -> {
                 popLong(RAX);
                 a.push(RAX);
@@ -1366,8 +1478,8 @@ final class MethodCompiler {
         return switch (kind) {
             case BYTE, BOOLEAN -> 1;
             case CHAR, SHORT -> 2;
-            case INT -> 4;
-            case LONG, REFERENCE -> 8;
+            case INT, FLOAT -> 4;
+            case LONG, DOUBLE, REFERENCE -> 8;
             default -> 0;
         };
     }
@@ -1399,7 +1511,7 @@ final class MethodCompiler {
         checkedArrayAccess(0);
         a.load(width, kind == TypeKind.BYTE || kind == TypeKind.SHORT, RAX,
                 Mem.at(RAX, RCX, width, Layouts.ARRAY_DATA_OFFSET));
-        pushValue(RAX, kind == TypeKind.LONG);
+        pushValue(RAX, kind.slotSize() == 2);
     }
 
     private void arrayStore(TypeKind kind) {
@@ -1410,8 +1522,8 @@ final class MethodCompiler {
         if (kind == TypeKind.REFERENCE) {
             arrayStoreCheck();
         }
-        popValue(RDX, kind == TypeKind.LONG);
-        checkedArrayAccess(kind == TypeKind.LONG ? 2 : 1);
+        popValue(RDX, kind.slotSize() == 2);
+        checkedArrayAccess(kind.slotSize() == 2 ? 2 : 1);
         a.store(width, Mem.at(RAX, RCX, width, Layouts.ARRAY_DATA_OFFSET), RDX);
     }
 
