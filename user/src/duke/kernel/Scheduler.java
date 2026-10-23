@@ -13,7 +13,7 @@ import duke.rt.Tib;
  * then the word the kernel clears once the thread has exited (CLONE_CHILD_CLEARTID). Main has slot
  * 0, on _start's stack and block. There's no munmap yet, so a slot whose word is clear is reused
  * instead: nothing runs on that stack any more. The slot is also the thread's CPU index, which the
- * heap lock records its holder by.
+ * heap lock records its holder by, and Smp stops it by for a collection.
  *
  * <p>All of this is guarded by {@link #lock}, a futex lock. As in the kernel, nothing allocates
  * under it.
@@ -66,7 +66,7 @@ public final class Scheduler {
     private static final long CLONE_FLAGS = 0x100 | 0x200 | 0x400 | 0x800 | 0x10000 | 0x40000 | 0x100000 | 0x200000;
     private static final long NANOS_PER_SECOND = 1_000_000_000L;
 
-    private static final int MAX_THREADS = 256;
+    static final int MAX_THREADS = 256;
     /** As main's (Compiler.USER_STACK_SIZE), and HotSpot's default; touched pages only. */
     private static final long STACK_BYTES = 1024 * 1024;
     private static final long BLOCK_BYTES = 4096;
@@ -84,6 +84,7 @@ public final class Scheduler {
     private static final Task[] TASKS = new Task[MAX_THREADS];
     /** Each slot's mapping, or 0 until its first thread. */
     private static final long[] SLOTS = new long[MAX_THREADS];
+    private static long mainBlock;
     private static long lastId;
     private static int threadNumber;
 
@@ -95,6 +96,8 @@ public final class Scheduler {
         Task main = new Thread("main").kernelTask();
         main.state = RUNNING;
         TASKS[0] = main;
+        mainBlock = Magic.cpuBlock();
+        Smp.enterJava(0);
     }
 
     /** Takes the lock, sleeping on its word while another thread holds it. */
@@ -188,6 +191,7 @@ public final class Scheduler {
         Magic.pokeLong(top, block);
         Task previous = TASKS[slot];
         TASKS[slot] = task;
+        Smp.outsideJava(slot);
         task.state = RUNNING;
         long tid = Magic.cloneThread(CLONE_FLAGS, top, block + BLOCK_TID, block + BLOCK_TID);
         if (tid < 0) {
@@ -219,6 +223,7 @@ public final class Scheduler {
      */
     static void threadMain() {
         Magic.resetStackLimit();
+        Smp.enterJava(Magic.cpuIndex());
         Task self = current();
         try {
             self.thread.run();
@@ -230,6 +235,7 @@ public final class Scheduler {
         self.done[0] = 1;
         unlock();
         futexWake(address(self.done), Integer.MAX_VALUE);
+        Smp.outsideJava(Magic.cpuIndex());
     }
 
     public static boolean isAlive(Task task) {
@@ -278,17 +284,6 @@ public final class Scheduler {
         }
     }
 
-    /** Whether any thread but this one is running, for the collector, which doesn't stop them yet. */
-    static boolean othersAlive() {
-        Task self = current();
-        for (Task task : TASKS) {
-            if (task != null && task != self && isAlive(task)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /**
      * Sleeps until another thread {@link #unpark}s this one, and takes the permit; false if
      * {@code deadline} (monotonic nanoseconds, 0 for none) passes first.
@@ -323,6 +318,11 @@ public final class Scheduler {
         return self.time[0] * NANOS_PER_SECOND + self.time[1];
     }
 
+    /** The CPU block of the thread in {@code slot}. */
+    static long block(int slot) {
+        return slot == 0 ? mainBlock : SLOTS[slot] + STACK_BYTES;
+    }
+
     public static int taskCount() {
         return 0;
     }
@@ -332,7 +332,7 @@ public final class Scheduler {
     }
 
     private static void futexWait(long word, int expected, long timeout) {
-        Magic.syscall(FUTEX, word, FUTEX_WAIT_PRIVATE, expected, timeout, 0, 0);
+        Smp.blockingSyscall(FUTEX, word, FUTEX_WAIT_PRIVATE, expected, timeout);
     }
 
     private static void futexWake(long word, int count) {

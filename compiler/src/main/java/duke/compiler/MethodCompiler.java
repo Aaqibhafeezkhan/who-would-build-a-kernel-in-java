@@ -974,6 +974,13 @@ final class MethodCompiler {
                 a.xchg(false, Mem.at(RSI), RAX);
                 a.push(RAX);
             }
+            case "compareAndExchangeLong" -> {
+                popLong(RCX);
+                popLong(RAX);
+                popLong(RSI);
+                a.lockCmpxchg(true, Mem.at(RSI), RCX);
+                pushLong(RAX);
+            }
             case "stackLimit" -> {
                 a.load(8, false, RAX, Compiler.STACK_LIMIT);
                 pushLong(RAX);

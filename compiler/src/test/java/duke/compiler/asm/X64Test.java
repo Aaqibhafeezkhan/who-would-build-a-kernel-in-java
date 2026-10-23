@@ -108,6 +108,8 @@ class X64Test {
                 c("xchg qword ptr [rsi], rax", "48 87 06", a -> a.xchg(true, Mem.at(RSI), RAX)),
                 c("lock cmpxchg byte ptr [rsi], cl", "f0 0f b0 0e", a -> a.lockCmpxchgByte(Mem.at(RSI), RCX)),
                 c("lock cmpxchg byte ptr [r9 + 8], cl", "f0 41 0f b0 49 08", a -> a.lockCmpxchgByte(Mem.at(R9, 8), RCX)),
+                c("lock cmpxchg qword ptr [rsi], rcx", "f0 48 0f b1 0e", a -> a.lockCmpxchg(true, Mem.at(RSI), RCX)),
+                c("lock cmpxchg qword ptr [r9 + 8], rcx", "f0 49 0f b1 49 08", a -> a.lockCmpxchg(true, Mem.at(R9, 8), RCX)),
                 c("ud2", "0f 0b", X64::ud2),
                 c("int3", "cc", X64::int3),
                 c("in al, dx", "ec", a -> a.in(1)),

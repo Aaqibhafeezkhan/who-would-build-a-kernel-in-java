@@ -310,8 +310,7 @@ through `Magic.syscall`. Nothing in the runtime knows which one it got. Before a
 1 GiB for the heap plus its mark bits and mark stack, and hands them to `Heap.growInto` as the
 kernel's `KernelHeap` does with page tables. Both Linux and Duke fill those pages in as they're
 first touched, so the backing's commit has nothing to do, and the collector runs exactly as in
-the kernel, with no other threads to stop: one that starts while other threads are running
-panics, until the collector can stop them. `main` may take `String[] args` or nothing, as on
+the kernel. `main` may take `String[] args` or nothing, as on
 HotSpot. If it takes them, `_start` calls `UserRuntime.arguments` after the initializers have run,
 which builds them from the argv Linux's initial stack layout left, decoding UTF-8 into our Latin-1
 strings. `System.err` writes to fd 2. An exception that leaves `main` goes to `Panic.uncaught`,
@@ -327,6 +326,15 @@ the kernel's, with a futex where the kernel switches threads: a thread that bloc
 on a futex word of its own, and whoever hands it the monitor unparks it. The scheduler lock is a
 futex lock too. There's no `munmap` yet, so a slot is reused once the kernel has cleared its
 `CLONE_CHILD_CLEARTID` word.
+A collection stops the other threads as the kernel stops its other CPUs, with each slot standing
+in for a CPU: the user `Smp.stopOthers` puts `PREEMPT` in each running thread's stack limit, with a
+`lock cmpxchg` since a thread rewrites its own limit as it overflows and unwinds, and its next
+safepoint records its frame and sleeps on a futex. A thread blocked in a system call can't reach
+a safepoint, so it doesn't have to: `Smp.blockingSyscall`, which the futex waits and `write` go
+through, records its frame and marks the thread native on the way in, and on the way out waits
+for any collection to finish before it touches the heap. Marking itself native and checking for a
+collection, against the collector announcing itself and checking who's native, are each an `xchg`
+and then a load, so one side always sees the other.
 `make user-test` runs each program in `tests/user` on HotSpot, on Linux and on Duke and compares
 the three.
 

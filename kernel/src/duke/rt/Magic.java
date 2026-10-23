@@ -89,6 +89,9 @@ public final class Magic {
     /** Atomically stores {@code value} at {@code address} and returns what was there. */
     public static native int exchangeInt(long address, int value);
 
+    /** Atomically stores {@code value} at {@code address} if {@code expected} is there; returns what was there. */
+    public static native long compareAndExchangeLong(long address, long expected, long value);
+
     /** The rsp below which method prologues throw StackOverflowError; 0 disables the checks. */
     public static native long stackLimit();
 
