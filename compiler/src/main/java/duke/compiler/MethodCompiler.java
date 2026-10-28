@@ -1062,6 +1062,11 @@ final class MethodCompiler {
                 pushLong(RAX);
             }
             case "doubleToRawLongBits", "longBitsToDouble", "floatToRawIntBits", "intBitsToFloat" -> { }
+            case "sqrt" -> {
+                popFloat(0, true);
+                a.sse(Sse.SQRT, true, 0, 0);
+                pushFloat(0, true);
+            }
             case "toObject" -> {
                 popLong(RAX);
                 a.push(RAX);

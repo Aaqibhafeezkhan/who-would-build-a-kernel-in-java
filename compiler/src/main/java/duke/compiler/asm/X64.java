@@ -51,7 +51,7 @@ public final class X64 {
 
     /** Scalar SSE arithmetic: {@code addsd}, {@code addss} and the rest. */
     public enum Sse {
-        ADD(0x58), MUL(0x59), SUB(0x5C), DIV(0x5E);
+        ADD(0x58), MUL(0x59), SUB(0x5C), DIV(0x5E), SQRT(0x51);
 
         final int opcode;
 
@@ -421,7 +421,7 @@ public final class X64 {
         regOp(wide, false, xmm, dst.code(), 0x0F, 0x7E);
     }
 
-    /** {@code addsd dst, src} and the rest on doubles, or {@code addss} and the rest on floats. */
+    /** {@code addsd dst, src} and the rest on doubles, or {@code addss} and the rest on floats; {@code sqrtsd} reads only src. */
     public void sse(Sse op, boolean dbl, int dst, int src) {
         out.emit8(dbl ? 0xF2 : 0xF3);
         regOp(false, false, dst, src, 0x0F, op.opcode);

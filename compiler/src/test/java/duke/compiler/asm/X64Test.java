@@ -151,6 +151,7 @@ class X64Test {
                 c("movq xmm9, r10", "66 4d 0f 6e ca", a -> a.movToXmm(true, 9, R10)),
                 c("movq r11, xmm12", "66 4d 0f 7e e3", a -> a.movFromXmm(true, R11, 12)),
                 c("addsd xmm0, xmm1", "f2 0f 58 c1", a -> a.sse(X64.Sse.ADD, true, 0, 1)),
+                c("sqrtsd xmm0, xmm0", "f2 0f 51 c0", a -> a.sse(X64.Sse.SQRT, true, 0, 0)),
                 c("subss xmm0, xmm1", "f3 0f 5c c1", a -> a.sse(X64.Sse.SUB, false, 0, 1)),
                 c("mulsd xmm8, xmm1", "f2 44 0f 59 c1", a -> a.sse(X64.Sse.MUL, true, 8, 1)),
                 c("divss xmm0, xmm15", "f3 41 0f 5e c7", a -> a.sse(X64.Sse.DIV, false, 0, 15)),

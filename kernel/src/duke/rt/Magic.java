@@ -65,6 +65,9 @@ public final class Magic {
 
     public static native float intBitsToFloat(int bits);
 
+    /** sqrtsd, which rounds correctly as Math.sqrt must. */
+    public static native double sqrt(double value);
+
     public static native Object toObject(long address);
 
     public static native long heapArenaStart();

@@ -1,7 +1,11 @@
 package java.lang;
 
-/** Integer operations only until floating point lands (#26). */
+import duke.rt.Magic;
+
 public final class Math {
+
+    public static final double E = 2.718281828459045;
+    public static final double PI = 3.141592653589793;
 
     private Math() {
     }
@@ -142,5 +146,93 @@ public final class Math {
             throw new ArithmeticException("integer overflow");
         }
         return (int) value;
+    }
+
+    public static double abs(double a) {
+        return Double.longBitsToDouble(Double.doubleToRawLongBits(a) & Long.MAX_VALUE);
+    }
+
+    public static float abs(float a) {
+        return Float.intBitsToFloat(Float.floatToRawIntBits(a) & Integer.MAX_VALUE);
+    }
+
+    // NaN wins, and -0.0 is below 0.0, which < can't see. Equal values other than zeros have the
+    // same bits, so or-ing (and-ing in max) the bits only ever picks a zero's sign.
+    public static double min(double a, double b) {
+        if (a != a) {
+            return a;
+        }
+        if (a == b) {
+            return Double.longBitsToDouble(Double.doubleToRawLongBits(a) | Double.doubleToRawLongBits(b));
+        }
+        return a < b ? a : b;
+    }
+
+    public static double max(double a, double b) {
+        if (a != a) {
+            return a;
+        }
+        if (a == b) {
+            return Double.longBitsToDouble(Double.doubleToRawLongBits(a) & Double.doubleToRawLongBits(b));
+        }
+        return a > b ? a : b;
+    }
+
+    public static float min(float a, float b) {
+        if (a != a) {
+            return a;
+        }
+        if (a == b) {
+            return Float.intBitsToFloat(Float.floatToRawIntBits(a) | Float.floatToRawIntBits(b));
+        }
+        return a < b ? a : b;
+    }
+
+    public static float max(float a, float b) {
+        if (a != a) {
+            return a;
+        }
+        if (a == b) {
+            return Float.intBitsToFloat(Float.floatToRawIntBits(a) & Float.floatToRawIntBits(b));
+        }
+        return a > b ? a : b;
+    }
+
+    public static double copySign(double magnitude, double sign) {
+        return Double.longBitsToDouble(Double.doubleToRawLongBits(magnitude) & Long.MAX_VALUE
+                | Double.doubleToRawLongBits(sign) & Long.MIN_VALUE);
+    }
+
+    public static float copySign(float magnitude, float sign) {
+        return Float.intBitsToFloat(Float.floatToRawIntBits(magnitude) & Integer.MAX_VALUE
+                | Float.floatToRawIntBits(sign) & Integer.MIN_VALUE);
+    }
+
+    public static double sqrt(double a) {
+        return Magic.sqrt(a);
+    }
+
+    // Through long rather than roundsd, which needs SSE4.1 and QEMU's default CPU hasn't got it.
+    // From 2^52 up every double is whole already; the sign copy keeps floor(-0.0) and ceil(-0.5) at -0.0.
+    public static double floor(double a) {
+        if (!(abs(a) < 0x1p52)) {
+            return a;
+        }
+        double r = (long) a;
+        if (r > a) {
+            r -= 1;
+        }
+        return r == 0 ? copySign(r, a) : r;
+    }
+
+    public static double ceil(double a) {
+        if (!(abs(a) < 0x1p52)) {
+            return a;
+        }
+        double r = (long) a;
+        if (r < a) {
+            r += 1;
+        }
+        return r == 0 ? copySign(r, a) : r;
     }
 }
