@@ -467,6 +467,34 @@ public final class X64 {
         out.emit8(0xE3);
     }
 
+    /** {@code fld qword [m]}, or {@code dword} unless {@code dbl}: pushes onto the x87 stack. */
+    public void fld(boolean dbl, Mem address) {
+        memOp(false, false, 0, address, 0, dbl ? 0xDD : 0xD9);
+    }
+
+    /** {@code fstp qword [m]}, or {@code dword} unless {@code dbl}. */
+    public void fstp(boolean dbl, Mem address) {
+        memOp(false, false, 3, address, 0, dbl ? 0xDD : 0xD9);
+    }
+
+    /** {@code fstp st(i)}: copies st(0) to st(i), then pops. */
+    public void fstp(int i) {
+        out.emit8(0xDD);
+        out.emit8(0xD8 + i);
+    }
+
+    /** {@code fprem}: st(0) % st(1), truncating like Java's %; C2 stays set while it's only partway. */
+    public void fprem() {
+        out.emit8(0xD9);
+        out.emit8(0xF8);
+    }
+
+    /** {@code fnstsw ax}. */
+    public void fnstswAx() {
+        out.emit8(0xDF);
+        out.emit8(0xE0);
+    }
+
     public void rdmsr() {
         out.emit8(0x0F);
         out.emit8(0x32);

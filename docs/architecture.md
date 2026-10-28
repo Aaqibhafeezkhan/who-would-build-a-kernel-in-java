@@ -580,9 +580,9 @@ and `String.length`/`charAt`.
 Floats and doubles are kept as their bits on the Java stack and in locals, like ints and longs, and
 go through xmm0 and xmm1 only within one bytecode, so calls and thread switches never save them.
 Comparisons give javac's fcmpl/fcmpg answers for NaN, and conversions to int and long saturate,
-with NaN going to 0, where `cvttsd2si` would give the most negative value. Not yet, and a clear
-compile error: `%` on floats and doubles. `Double` and `Float` have only their static methods so
-far, with no boxing or `toString`.
+with NaN going to 0, where `cvttsd2si` would give the most negative value. SSE has no remainder,
+so `%` goes through the x87's `fprem`, which truncates like Java's and is exact. `Double` and
+`Float` have only their static methods so far, with no boxing or `toString`.
 
 String concatenation works because the kernel compiles with `javac -XDstringConcat=inline`, which
 turns `+` into `StringBuilder` calls instead of an `invokedynamic`. Every place that compiles

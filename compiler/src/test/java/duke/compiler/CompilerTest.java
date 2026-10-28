@@ -67,13 +67,14 @@ class CompilerTest {
     }
 
     @Test
-    void unsupportedBytecodeErrorNamesMethodAndLine() throws IOException {
+    void compileErrorNamesMethodAndLine() throws IOException {
         Path classes = compile("""
                 package duke.test;
                 public final class Entry {
+                    static native int peek();
                     static int half(int x) {
-                        float f = x;
-                        return (int) (f % 2);
+                        x /= 2;
+                        return x + peek();
                     }
                     public static void main() {
                         half(0);
@@ -82,7 +83,7 @@ class CompilerTest {
                 """);
         CompileException e = assertThrows(CompileException.class,
                 () -> new Compiler(ClassPool.load(classes)).compile("duke/test/Entry", "main"));
-        assertEquals("duke/test/Entry.half(I)I (line 5): % on floats and doubles is not supported yet",
+        assertEquals("duke/test/Entry.half(I)I (line 6): call to native method duke/test/Entry.peek; only duke/rt/Magic intrinsics may be native",
                 e.getMessage());
     }
 

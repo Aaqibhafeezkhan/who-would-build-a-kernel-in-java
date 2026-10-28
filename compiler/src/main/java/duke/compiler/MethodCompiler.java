@@ -399,7 +399,8 @@ final class MethodCompiler {
             case FCMPG -> floatCompare(false, 1);
             case DCMPL -> floatCompare(true, -1);
             case DCMPG -> floatCompare(true, 1);
-            case FREM, DREM -> throw error("% on floats and doubles is not supported yet");
+            case FREM -> floatRemainder(false);
+            case DREM -> floatRemainder(true);
             case ARRAYLENGTH -> {
                 a.pop(RAX);
                 consumed = 1;
@@ -445,6 +446,31 @@ final class MethodCompiler {
         popFloat(0, dbl);
         a.sse(op, dbl, 0, 1);
         pushFloat(0, dbl);
+    }
+
+    /**
+     * frem and drem on the x87, since SSE has no remainder. fprem truncates like Java's % and is
+     * exact, so storing back to a float or double doesn't round; it reduces the exponent gap by at
+     * most 63 per go, so it repeats while C2 says it's only partway.
+     */
+    private void floatRemainder(boolean dbl) {
+        int slot = dbl ? 16 : 8;
+        a.fld(dbl, Mem.at(RSP, slot - 8));
+        a.fld(dbl, Mem.at(RSP, 2 * slot - 8));
+        X64.Label partial = new X64.Label();
+        a.bind(partial);
+        a.fprem();
+        a.fnstswAx();
+        a.aluImm(Alu.AND, false, RAX, 0x400);
+        a.jcc(Cond.NE, partial);
+        a.fstp(1);
+        a.aluImm(Alu.ADD, true, RSP, slot);
+        a.fstp(dbl, Mem.at(RSP, slot - 8));
+        if (dbl) {
+            // Only the copy popLong reads was written; make both match.
+            popLong(RAX);
+            pushLong(RAX);
+        }
     }
 
     /** fcmpl and the rest: -1, 0 or 1, and {@code ifNaN} when either is NaN. */
