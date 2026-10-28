@@ -43,6 +43,16 @@ public final class Integer extends Number implements Comparable<Integer> {
     }
 
     @Override
+    public float floatValue() {
+        return value;
+    }
+
+    @Override
+    public double doubleValue() {
+        return value;
+    }
+
+    @Override
     public boolean equals(Object other) {
         return other instanceof Integer i && i.value == value;
     }

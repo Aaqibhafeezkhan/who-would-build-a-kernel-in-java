@@ -2,8 +2,8 @@ package java.lang;
 
 import duke.rt.Magic;
 
-/** The static half for now: boxing and toString need formatting, which comes later (#26). */
-public final class Double {
+/** Without toString until formatting lands (#26), so printing one fails loudly rather than as Double@hash. */
+public final class Double extends Number implements Comparable<Double> {
 
     public static final double POSITIVE_INFINITY = 1.0 / 0.0;
     public static final double NEGATIVE_INFINITY = -1.0 / 0.0;
@@ -14,7 +14,60 @@ public final class Double {
     public static final int SIZE = 64;
     public static final int BYTES = 8;
 
-    private Double() {
+    private final double value;
+
+    private Double(double value) {
+        this.value = value;
+    }
+
+    public static Double valueOf(double value) {
+        return new Double(value);
+    }
+
+    @Override
+    public int intValue() {
+        return (int) value;
+    }
+
+    @Override
+    public long longValue() {
+        return (long) value;
+    }
+
+    @Override
+    public float floatValue() {
+        return (float) value;
+    }
+
+    @Override
+    public double doubleValue() {
+        return value;
+    }
+
+    /** By bits, unlike ==: NaN equals NaN, and 0.0 doesn't equal -0.0. */
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof Double d && doubleToLongBits(d.value) == doubleToLongBits(value);
+    }
+
+    @Override
+    public int hashCode() {
+        return hashCode(value);
+    }
+
+    @Override
+    public String toString() {
+        throw new UnsupportedOperationException("Double.toString isn't written yet (#26)");
+    }
+
+    @Override
+    public int compareTo(Double other) {
+        return compare(value, other.value);
+    }
+
+    public static int hashCode(double value) {
+        long bits = doubleToLongBits(value);
+        return (int) (bits ^ bits >>> 32);
     }
 
     public static long doubleToRawLongBits(double value) {

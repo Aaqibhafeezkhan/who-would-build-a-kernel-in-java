@@ -45,6 +45,16 @@ public final class Short extends Number implements Comparable<Short> {
     }
 
     @Override
+    public float floatValue() {
+        return value;
+    }
+
+    @Override
+    public double doubleValue() {
+        return value;
+    }
+
+    @Override
     public short shortValue() {
         return value;
     }

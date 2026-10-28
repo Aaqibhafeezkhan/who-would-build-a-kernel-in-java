@@ -38,6 +38,16 @@ public final class Long extends Number implements Comparable<Long> {
     }
 
     @Override
+    public float floatValue() {
+        return value;
+    }
+
+    @Override
+    public double doubleValue() {
+        return value;
+    }
+
+    @Override
     public boolean equals(Object other) {
         return other instanceof Long l && l.value == value;
     }

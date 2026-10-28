@@ -46,6 +46,16 @@ public final class Byte extends Number implements Comparable<Byte> {
     }
 
     @Override
+    public float floatValue() {
+        return value;
+    }
+
+    @Override
+    public double doubleValue() {
+        return value;
+    }
+
+    @Override
     public byte byteValue() {
         return value;
     }

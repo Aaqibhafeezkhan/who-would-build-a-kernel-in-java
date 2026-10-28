@@ -2,8 +2,8 @@ package java.lang;
 
 import duke.rt.Magic;
 
-/** The static half for now: boxing and toString need formatting, which comes later (#26). */
-public final class Float {
+/** Without toString until formatting lands (#26), so printing one fails loudly rather than as Float@hash. */
+public final class Float extends Number implements Comparable<Float> {
 
     public static final float POSITIVE_INFINITY = 1.0f / 0.0f;
     public static final float NEGATIVE_INFINITY = -1.0f / 0.0f;
@@ -14,7 +14,59 @@ public final class Float {
     public static final int SIZE = 32;
     public static final int BYTES = 4;
 
-    private Float() {
+    private final float value;
+
+    private Float(float value) {
+        this.value = value;
+    }
+
+    public static Float valueOf(float value) {
+        return new Float(value);
+    }
+
+    @Override
+    public int intValue() {
+        return (int) value;
+    }
+
+    @Override
+    public long longValue() {
+        return (long) value;
+    }
+
+    @Override
+    public float floatValue() {
+        return value;
+    }
+
+    @Override
+    public double doubleValue() {
+        return value;
+    }
+
+    /** By bits, unlike ==: NaN equals NaN, and 0.0 doesn't equal -0.0. */
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof Float f && floatToIntBits(f.value) == floatToIntBits(value);
+    }
+
+    @Override
+    public int hashCode() {
+        return hashCode(value);
+    }
+
+    @Override
+    public String toString() {
+        throw new UnsupportedOperationException("Float.toString isn't written yet (#26)");
+    }
+
+    @Override
+    public int compareTo(Float other) {
+        return compare(value, other.value);
+    }
+
+    public static int hashCode(float value) {
+        return floatToIntBits(value);
     }
 
     public static int floatToRawIntBits(float value) {
