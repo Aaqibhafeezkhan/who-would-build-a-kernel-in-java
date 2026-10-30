@@ -51,6 +51,14 @@ public final class StringBuilder {
         return append(Long.toString(l));
     }
 
+    public StringBuilder append(float f) {
+        return append(Float.toString(f));
+    }
+
+    public StringBuilder append(double d) {
+        return append(Double.toString(d));
+    }
+
     public StringBuilder append(boolean b) {
         return append(b ? "true" : "false");
     }

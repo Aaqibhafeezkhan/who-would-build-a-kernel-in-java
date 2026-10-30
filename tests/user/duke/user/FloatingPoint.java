@@ -28,5 +28,8 @@ class FloatingPoint {
         for (long sum : sums) {
             System.out.println(Long.toHexString(sum));
         }
+        System.out.println(Math.PI);
+        System.out.println(0.1f + 0.2f);
+        System.out.println("mean " + Double.longBitsToDouble(sums[0] & Long.MAX_VALUE) / 4);
     }
 }

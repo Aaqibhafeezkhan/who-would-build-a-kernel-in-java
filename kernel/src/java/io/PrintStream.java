@@ -36,6 +36,14 @@ public class PrintStream {
         write(String.valueOf(l), false);
     }
 
+    public void print(float f) {
+        write(String.valueOf(f), false);
+    }
+
+    public void print(double d) {
+        write(String.valueOf(d), false);
+    }
+
     public void print(boolean b) {
         write(String.valueOf(b), false);
     }
@@ -62,6 +70,14 @@ public class PrintStream {
 
     public void println(long l) {
         write(String.valueOf(l), true);
+    }
+
+    public void println(float f) {
+        write(String.valueOf(f), true);
+    }
+
+    public void println(double d) {
+        write(String.valueOf(d), true);
     }
 
     public void println(boolean b) {

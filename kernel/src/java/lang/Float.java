@@ -2,7 +2,6 @@ package java.lang;
 
 import duke.rt.Magic;
 
-/** Without toString until formatting lands (#26), so printing one fails loudly rather than as Float@hash. */
 public final class Float extends Number implements Comparable<Float> {
 
     public static final float POSITIVE_INFINITY = 1.0f / 0.0f;
@@ -59,7 +58,11 @@ public final class Float extends Number implements Comparable<Float> {
 
     @Override
     public String toString() {
-        throw new UnsupportedOperationException("Float.toString isn't written yet (#26)");
+        return toString(value);
+    }
+
+    public static String toString(float value) {
+        return ShortestDecimal.of(value);
     }
 
     @Override

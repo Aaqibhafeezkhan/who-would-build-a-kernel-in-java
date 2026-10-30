@@ -2,7 +2,6 @@ package java.lang;
 
 import duke.rt.Magic;
 
-/** Without toString until formatting lands (#26), so printing one fails loudly rather than as Double@hash. */
 public final class Double extends Number implements Comparable<Double> {
 
     public static final double POSITIVE_INFINITY = 1.0 / 0.0;
@@ -59,7 +58,11 @@ public final class Double extends Number implements Comparable<Double> {
 
     @Override
     public String toString() {
-        throw new UnsupportedOperationException("Double.toString isn't written yet (#26)");
+        return toString(value);
+    }
+
+    public static String toString(double value) {
+        return ShortestDecimal.of(value);
     }
 
     @Override
