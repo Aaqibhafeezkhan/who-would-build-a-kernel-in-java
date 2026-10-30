@@ -84,7 +84,10 @@ public class PanicTests {
         Path dir = OUT.resolve(c.name());
         Path esp = Harness.buildImage(classes, "duke/panics/" + c.name() + ".main", dir);
         Path serial = dir.resolve("serial.log");
-        Process qemu = new ProcessBuilder("tools/qemu.sh", esp.toString(), "-serial", "file:" + serial)
+        Postmortem postmortem = Postmortem.in(dir, dir.resolve("kernel.map"));
+        List<String> command = new ArrayList<>(List.of("tools/qemu.sh", esp.toString(), "-serial", "file:" + serial));
+        command.addAll(postmortem.qemuArguments());
+        Process qemu = new ProcessBuilder(command)
                 .directory(Harness.ROOT.toFile())
                 .redirectErrorStream(true)
                 .redirectOutput(dir.resolve("qemu.txt").toFile())
@@ -101,7 +104,7 @@ public class PanicTests {
                 }
                 Thread.sleep(100);
             }
-            return new Result(c, false, Harness.readSerial(serial));
+            return new Result(c, false, Harness.readSerial(serial) + postmortem.report());
         } finally {
             qemu.destroy();
             qemu.waitFor();

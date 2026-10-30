@@ -7,6 +7,7 @@ import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -40,16 +41,15 @@ public class ShellTest {
     public static void main(String[] args) throws Exception {
         Harness.deleteRecursively(OUT);
         Files.createDirectories(OUT);
-        // Unix socket paths max out at 108 bytes, which a CI checkout path alone can come close to.
-        Path monitor = Files.createTempDirectory("duke").resolve("monitor.sock");
+        Postmortem postmortem = Postmortem.in(OUT, ESP.resolveSibling("kernel.map"));
+        Path monitor = postmortem.monitor;
         Path fat32 = OUT.resolve("fat32.img");
         FatImage.writeSample(fat32);
-        Process qemu = new ProcessBuilder("tools/qemu.sh", ESP.toString(), "-serial", "stdio",
+        List<String> command = new ArrayList<>(List.of("tools/qemu.sh", ESP.toString(), "-serial", "stdio",
                 "-drive", "if=none,id=fat32,format=raw,snapshot=on,file=" + fat32,
-                "-device", "virtio-blk-pci,drive=fat32",
-                "-monitor", "unix:" + monitor + ",server=on,wait=off",
-                // QEMU's own account of guest errors and CPU resets, for boots that die before the kernel runs.
-                "-d", "guest_errors,cpu_reset,unimp", "-D", OUT.resolve("qemu.log").toString())
+                "-device", "virtio-blk-pci,drive=fat32"));
+        command.addAll(postmortem.qemuArguments());
+        Process qemu = new ProcessBuilder(command)
                 .directory(Harness.ROOT.toFile())
                 .redirectErrorStream(true)
                 .start();
@@ -65,10 +65,7 @@ public class ShellTest {
                 System.out.println("shell-test: " + Runtime.getRuntime().availableProcessors() + " cores; busiest processes:");
                 new ProcessBuilder("sh", "-c", "ps -eo pid,pcpu,etime,args --sort=-pcpu 2>/dev/null | head -12 || ps -Ao pid,pcpu,etime,command -r | head -12")
                         .inheritIO().start().waitFor();
-                if (qemu.isAlive()) {
-                    System.out.println("shell-test: where each CPU is (look the RIPs up in build/kernel.map):");
-                    System.out.println(query(monitor, "info registers -a").indent(4));
-                }
+                System.out.print(postmortem.report());
                 qemu.destroy();
                 qemu.waitFor(10, TimeUnit.SECONDS);
                 Files.writeString(OUT.resolve("serial.log"), output.toString());
@@ -230,22 +227,6 @@ public class ShellTest {
             channel.connect(UnixDomainSocketAddress.of(monitor));
             channel.write(ByteBuffer.wrap((line + "\n").getBytes(StandardCharsets.US_ASCII)));
             Thread.sleep(300);
-        }
-    }
-
-    /** Sends a monitor command and returns what QEMU answered. */
-    static String query(Path monitor, String line) throws Exception {
-        try (SocketChannel channel = SocketChannel.open(StandardProtocolFamily.UNIX)) {
-            channel.connect(UnixDomainSocketAddress.of(monitor));
-            channel.write(ByteBuffer.wrap((line + "\n").getBytes(StandardCharsets.US_ASCII)));
-            Thread.sleep(1000);
-            channel.configureBlocking(false);
-            StringBuilder answer = new StringBuilder();
-            ByteBuffer buffer = ByteBuffer.allocate(1 << 16);
-            for (int n; (n = channel.read(buffer)) > 0; buffer.clear()) {
-                answer.append(new String(buffer.array(), 0, n, StandardCharsets.US_ASCII));
-            }
-            return clean(answer.toString());
         }
     }
 

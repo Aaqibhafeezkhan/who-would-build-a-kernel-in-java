@@ -57,8 +57,11 @@ A conformance test is a non-private, no-argument static method returning a primi
 single-line `String`. Because HotSpot is the reference, behaviour and exception messages must match
 the JDK exactly. That's the point.
 
-Library code runs in a kernel: no floating point yet, Strings are Latin-1, and interrupt handlers
-must not allocate.
+When a test boot hangs or QEMU exits early, the harness prints where each CPU was as a Java method,
+sampled three times a second apart (`tools/Postmortem.java`). If the methods change between samples
+the kernel is slow rather than stuck. QEMU's own log is saved next to the serial log.
+
+Library code runs in a kernel: Strings are Latin-1, and interrupt handlers must not allocate.
 
 ## Pull requests
 

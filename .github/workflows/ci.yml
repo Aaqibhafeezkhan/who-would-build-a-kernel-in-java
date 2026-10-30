@@ -85,14 +85,20 @@ jobs:
             build/kernel.elf
             build/kernel.map
             build/serial.log
+            build/serial.qemu.log
             build/shell-test/
             build-env.txt
             build/conformance/serial.log
+            build/conformance/serial.qemu.log
             build/conformance/boot.txt
             build/panics/*/serial.log
+            build/panics/*/qemu.log
             build/ktest/serial.log
+            build/ktest/qemu.log
             build/user-tests/duke/serial.log
+            build/user-tests/duke/qemu.log
             build/js-tests/duke/serial.log
+            build/js-tests/duke/qemu.log
             compiler/build/reports/tests/
             compiler/build/test-results/test/*.xml
           if-no-files-found: ignore

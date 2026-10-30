@@ -44,7 +44,8 @@ public class KernelTests {
         Path fat16 = OUT.resolve("fat16");
         FatImage.writeSampleDirectory(fat16);
         // The disk sits behind a PCIe root port, so the PCI scan has a bridge to follow.
-        Process qemu = new ProcessBuilder("tools/qemu.sh", esp.toString(), "-serial", "file:" + serial,
+        Postmortem postmortem = Postmortem.in(OUT, OUT.resolve("kernel.map"));
+        List<String> command = new ArrayList<>(List.of("tools/qemu.sh", esp.toString(), "-serial", "file:" + serial,
                 "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
                 "-device", "pcie-root-port,id=rp0,chassis=1",
                 "-drive", "if=none,id=disk0,format=raw,file=" + disk,
@@ -52,12 +53,15 @@ public class KernelTests {
                 "-drive", "if=none,id=fat32,format=raw,file=" + fat32,
                 "-device", "virtio-blk-pci,drive=fat32",
                 "-drive", "if=none,id=fat16,format=raw,snapshot=on,file=fat:16:" + fat16,
-                "-device", "virtio-blk-pci,drive=fat16")
+                "-device", "virtio-blk-pci,drive=fat16"));
+        command.addAll(postmortem.qemuArguments());
+        Process qemu = new ProcessBuilder(command)
                 .directory(Harness.ROOT.toFile())
                 .redirectErrorStream(true)
                 .redirectOutput(OUT.resolve("qemu.txt").toFile())
                 .start();
         boolean exited = qemu.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        String where = exited && qemu.exitValue() == PASS_STATUS ? "" : postmortem.report();
         if (!exited) {
             qemu.destroy();
         }
@@ -66,6 +70,7 @@ public class KernelTests {
         System.out.print(start < 0 ? output : output.substring(start));
         int status = exited ? qemu.exitValue() : -1;
         if (status != PASS_STATUS) {
+            System.out.print(where);
             System.out.println("ktest failed: QEMU exit status " + status + (exited ? "" : " (timed out)"));
             System.exit(1);
         }

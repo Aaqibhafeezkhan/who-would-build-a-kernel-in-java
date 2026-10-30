@@ -165,8 +165,11 @@ public class JsTests {
         Map<String, Result> results = new LinkedHashMap<>();
         Path image = dir.resolve(folder + ".img");
         FatImage.write(image, files, List.of());
-        Process qemu = new ProcessBuilder("tools/qemu.sh", ShellTest.ESP.toString(), "-serial", "stdio",
-                "-drive", "if=none,id=js,format=raw,snapshot=on,file=" + image, "-device", "virtio-blk-pci,drive=js")
+        Postmortem postmortem = Postmortem.in(dir, ShellTest.ESP.resolveSibling("kernel.map"));
+        List<String> command = new ArrayList<>(List.of("tools/qemu.sh", ShellTest.ESP.toString(), "-serial", "stdio",
+                "-drive", "if=none,id=js,format=raw,snapshot=on,file=" + image, "-device", "virtio-blk-pci,drive=js"));
+        command.addAll(postmortem.qemuArguments());
+        Process qemu = new ProcessBuilder(command)
                 .directory(ROOT.toFile())
                 .redirectErrorStream(true)
                 .start();
@@ -176,14 +179,15 @@ public class JsTests {
         try {
             if (!ShellTest.await("duke> ", 0)) {
                 throw new IllegalStateException("the kernel never reached its prompt:\n"
-                        + ShellTest.clean(ShellTest.output.toString()).indent(4));
+                        + ShellTest.clean(ShellTest.output.toString()).indent(4) + postmortem.report());
             }
             for (String name : files.keySet()) {
                 String path = "/" + name;
                 int from = ShellTest.output.length();
                 ShellTest.type(qemu.getOutputStream(), "run " + path + arguments + "\n");
                 if (!awaitPrompt(from)) {
-                    results.put(name.substring(folder.length() + 1), new Result("timed out:\n" + ShellTest.clean(ShellTest.output.substring(from)), -1));
+                    results.put(name.substring(folder.length() + 1), new Result("timed out:\n"
+                            + ShellTest.clean(ShellTest.output.substring(from)) + postmortem.report(), -1));
                     break;
                 }
                 // The shell echoes each key with a cursor redraw, so skip the whole command line.
