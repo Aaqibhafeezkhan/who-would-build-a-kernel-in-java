@@ -13,6 +13,8 @@ public final class Double extends Number implements Comparable<Double> {
     public static final double MIN_VALUE = 0x0.0000000000001P-1022;
     public static final int SIZE = 64;
     public static final int BYTES = 8;
+    public static final int MIN_EXPONENT = -1022;
+    public static final int MAX_EXPONENT = 1023;
 
     private final double value;
 
@@ -106,5 +108,17 @@ public final class Double extends Number implements Comparable<Double> {
         long bits1 = doubleToLongBits(d1);
         long bits2 = doubleToLongBits(d2);
         return bits1 == bits2 ? 0 : bits1 < bits2 ? -1 : 1;
+    }
+
+    public static double sum(double a, double b) {
+        return a + b;
+    }
+
+    public static double min(double a, double b) {
+        return Math.min(a, b);
+    }
+
+    public static double max(double a, double b) {
+        return Math.max(a, b);
     }
 }

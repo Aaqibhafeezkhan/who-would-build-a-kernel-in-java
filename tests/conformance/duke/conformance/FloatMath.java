@@ -38,7 +38,9 @@ final class FloatMath {
         return h;
     }
 
-    static long sqrtNegativeZero() { return Double.doubleToRawLongBits(Math.sqrt(-0.0)); }
+    static long sqrtNegativeZero() {
+        return Double.doubleToRawLongBits(Math.sqrt(-0.0));
+    }
 
     static long abs() {
         long h = 0;
@@ -83,7 +85,52 @@ final class FloatMath {
         return h;
     }
 
-    static long circleArea() { return Double.doubleToRawLongBits(Math.PI * 2.5 * 2.5 + Math.E); }
+    static long circleArea() {
+        return Double.doubleToRawLongBits(Math.PI * 2.5 * 2.5 + Math.E);
+    }
 
-    static long hypotenuse() { return Double.doubleToRawLongBits(Math.sqrt(3.0 * 3.0 + 4.1 * 4.1)); }
+    static long hypotenuse() {
+        return Double.doubleToRawLongBits(Math.sqrt(3.0 * 3.0 + 4.1 * 4.1));
+    }
+
+    static long getExponent() {
+        long h = 0;
+        for (double d : EDGES) {
+            h = h * 31 + Math.getExponent(d);
+            h = h * 31 + Math.getExponent((float) d);
+        }
+        return h;
+    }
+
+    static long sum() {
+        long h = 0;
+        for (double a : EDGES) {
+            for (double b : EDGES) {
+                h = h * 31 + Double.doubleToLongBits(Double.sum(a, b));
+                h = h * 31 + Float.floatToIntBits(Float.sum((float) a, (float) b));
+            }
+        }
+        return h;
+    }
+
+    static long minAndMaxWrappers() {
+        long h = 0;
+        for (double a : EDGES) {
+            for (double b : EDGES) {
+                h = h * 31 + Double.doubleToLongBits(Double.min(a, b));
+                h = h * 31 + Double.doubleToLongBits(Double.max(a, b));
+                h = h * 31 + Float.floatToIntBits(Float.min((float) a, (float) b));
+                h = h * 31 + Float.floatToIntBits(Float.max((float) a, (float) b));
+            }
+        }
+        return h;
+    }
+
+    static long exponentConstants() {
+        long h = Double.MIN_EXPONENT;
+        h = h * 31 + Double.MAX_EXPONENT;
+        h = h * 31 + Float.MIN_EXPONENT;
+        h = h * 31 + Float.MAX_EXPONENT;
+        return h;
+    }
 }

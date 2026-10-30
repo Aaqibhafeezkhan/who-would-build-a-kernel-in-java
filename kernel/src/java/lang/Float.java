@@ -13,6 +13,8 @@ public final class Float extends Number implements Comparable<Float> {
     public static final float MIN_VALUE = 0x0.000002P-126f;
     public static final int SIZE = 32;
     public static final int BYTES = 4;
+    public static final int MIN_EXPONENT = -126;
+    public static final int MAX_EXPONENT = 127;
 
     private final float value;
 
@@ -105,5 +107,16 @@ public final class Float extends Number implements Comparable<Float> {
         int bits1 = floatToIntBits(f1);
         int bits2 = floatToIntBits(f2);
         return bits1 == bits2 ? 0 : bits1 < bits2 ? -1 : 1;
+    }
+    public static float sum(float a, float b) {
+        return a + b;
+    }
+
+    public static float min(float a, float b) {
+        return Math.min(a, b);
+    }
+
+    public static float max(float a, float b) {
+        return Math.max(a, b);
     }
 }

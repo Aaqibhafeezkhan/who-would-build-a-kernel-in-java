@@ -34,6 +34,14 @@ public final class Math {
         return a >= b ? a : b;
     }
 
+    public static int getExponent(double d) {
+        return ((int) (Double.doubleToRawLongBits(d) >>> 52) & 0x7ff) - 1023;
+    }
+
+    public static int getExponent(float f) {
+        return ((int) (Float.floatToRawIntBits(f) >>> 23) & 0xff) - 127;
+    }
+
     public static int floorDiv(int x, int y) {
         int q = x / y;
         return (x % y != 0 && (x ^ y) < 0) ? q - 1 : q;
