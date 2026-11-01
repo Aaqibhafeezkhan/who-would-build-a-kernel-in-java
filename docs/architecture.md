@@ -583,8 +583,11 @@ Comparisons give javac's fcmpl/fcmpg answers for NaN, and conversions to int and
 with NaN going to 0, where `cvttsd2si` would give the most negative value. SSE has no remainder,
 so `%` goes through the x87's `fprem`, which truncates like Java's and is exact. `Double.toString`
 prints what HotSpot does: the shortest digits that read back as the same double, nearest of those,
-from Burger and Dybvig's digit generation on exact integers (`java.lang.ShortestDecimal`). Not yet:
-`Double.parseDouble`, and `Math` beyond `sqrt`, `floor`, `ceil` and the like.
+from Burger and Dybvig's digit generation on exact integers (`java.lang.ShortestDecimal`).
+`Double.parseDouble` goes the other way on the same integers (`java.lang.NearestBinary`): it rounds
+the exact decimal to the nearest double, and `Float.parseFloat` rounds straight to a float rather
+than through a double, which would round twice. Not yet: `Math` beyond `sqrt`, `floor`, `ceil` and
+the like.
 
 String concatenation works because the kernel compiles with `javac -XDstringConcat=inline`, which
 turns `+` into `StringBuilder` calls instead of an `invokedynamic`. Every place that compiles

@@ -65,6 +65,14 @@ public final class Float extends Number implements Comparable<Float> {
         return ShortestDecimal.of(value);
     }
 
+    public static float parseFloat(String s) {
+        return NearestBinary.parseFloat(s);
+    }
+
+    public static Float valueOf(String s) {
+        return valueOf(parseFloat(s));
+    }
+
     @Override
     public int compareTo(Float other) {
         return compare(value, other.value);

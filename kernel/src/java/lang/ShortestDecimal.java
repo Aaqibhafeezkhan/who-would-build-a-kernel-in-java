@@ -4,7 +4,7 @@ package java.lang;
  * Double.toString and Float.toString: the shortest decimal that reads back as the same value, and
  * of those the nearest, laid out as the JDK lays it out. The digits come from Burger and Dybvig's
  * free-format generation ("Printing Floating-Point Numbers Quickly and Accurately", 1996) on exact
- * integers, so every comparison is exact and nothing depends on the rounding of a double.
+ * integers (Bignum), so every comparison is exact and nothing depends on the rounding of a double.
  */
 final class ShortestDecimal {
 
@@ -52,10 +52,10 @@ final class ShortestDecimal {
         // Scaled so that r / s is the value, and mMinus / s and mPlus / s are half the gaps to the
         // neighbours below and above: anything strictly inside reads back as this value.
         int shift = unevenGap ? 2 : 1;
-        Big r = Big.of(f).shiftLeft(Math.max(e, 0) + shift);
-        Big s = Big.of(1).shiftLeft(Math.max(-e, 0) + shift);
-        Big mMinus = Big.of(1).shiftLeft(Math.max(e, 0));
-        Big mPlus = Big.of(1).shiftLeft(Math.max(e, 0) + (unevenGap ? 1 : 0));
+        Bignum r = Bignum.of(f).shiftLeft(Math.max(e, 0) + shift);
+        Bignum s = Bignum.of(1).shiftLeft(Math.max(-e, 0) + shift);
+        Bignum mMinus = Bignum.of(1).shiftLeft(Math.max(e, 0));
+        Bignum mPlus = Bignum.of(1).shiftLeft(Math.max(e, 0) + (unevenGap ? 1 : 0));
         // Round half to even reads the midpoints back as this value when f is even.
         boolean inclusive = (f & 1) == 0;
 
@@ -70,14 +70,14 @@ final class ShortestDecimal {
             mPlus.multiplyPow10(-k);
         }
         // Now r / s = value / 10^k; make k the least with the upper bound under 10^k.
-        Big scratch = new Big();
+        Bignum scratch = Bignum.scratch(r.bitLength() + 64);
         while (reachesHigh(r, mPlus, s, inclusive, scratch)) {
             s.multiplySmall(10);
             k++;
         }
-        Big r0 = r.copy();
-        Big mMinus0 = mMinus.copy();
-        Big mPlus0 = mPlus.copy();
+        Bignum r0 = r.copy();
+        Bignum mMinus0 = mMinus.copy();
+        Bignum mPlus0 = mPlus.copy();
 
         byte[] digits = new byte[20];
         int n = 0;
@@ -86,7 +86,7 @@ final class ShortestDecimal {
             mMinus.multiplySmall(10);
             mPlus.multiplySmall(10);
             int d = r.divideSmallQuotient(s);
-            int low = Big.compare(r, mMinus);
+            int low = Bignum.compare(r, mMinus);
             boolean lowOk = inclusive ? low <= 0 : low < 0;
             boolean highOk = reachesHigh(r, mPlus, s, inclusive, scratch);
             if (!lowOk && !highOk) {
@@ -94,7 +94,7 @@ final class ShortestDecimal {
                 continue;
             }
             if (lowOk && highOk) {
-                int half = Big.compare(r.copy().shiftLeft(1), s);
+                int half = Bignum.compare(r.copy().shiftLeft(1), s);
                 if (half > 0 || half == 0 && (d & 1) != 0) {
                     d++;
                 }
@@ -128,8 +128,8 @@ final class ShortestDecimal {
     }
 
     /** Whether r + mPlus reaches s, using {@code scratch} rather than allocating once per digit. */
-    private static boolean reachesHigh(Big r, Big mPlus, Big s, boolean inclusive, Big scratch) {
-        int c = Big.compare(Big.sumInto(r, mPlus, scratch), s);
+    private static boolean reachesHigh(Bignum r, Bignum mPlus, Bignum s, boolean inclusive, Bignum scratch) {
+        int c = Bignum.compare(Bignum.sumInto(r, mPlus, scratch), s);
         return inclusive ? c >= 0 : c > 0;
     }
 
@@ -137,32 +137,32 @@ final class ShortestDecimal {
      * value / 10^k * scale rounded to nearest, if that reads back as the value and is strictly
      * nearer than the single digit; otherwise -1. Under 10 means the scale is a place too coarse.
      */
-    private static int twoDigitsIfNearer(Big r0, Big mMinus0, Big mPlus0, Big s, int single, boolean inclusive,
+    private static int twoDigitsIfNearer(Bignum r0, Bignum mMinus0, Bignum mPlus0, Bignum s, int single, boolean inclusive,
             int scale) {
-        Big hundredR = r0.copy().multiplySmall(scale);
-        Big rest = hundredR.copy();
+        Bignum hundredR = r0.copy().multiplySmall(scale);
+        Bignum rest = hundredR.copy();
         int two = rest.divideSmallQuotient(s);
         if (two < 10) {
             return two;
         }
-        int round = Big.compare(rest.shiftLeft(1), s);
+        int round = Bignum.compare(rest.shiftLeft(1), s);
         if (round > 0 || round == 0 && (two & 1) != 0) {
             two++;
         }
         if (two % 10 == 0) {
             return -1;
         }
-        Big mMinus = mMinus0.copy().multiplySmall(scale);
-        Big mPlus = mPlus0.copy().multiplySmall(scale);
-        Big candidate = s.copy().multiplySmall(two);
-        Big singleValue = s.copy().multiplySmall(single * scale / 10);
-        int below = Big.compare(Big.sum(candidate, mMinus), hundredR);
-        int above = Big.compare(candidate, Big.sum(hundredR, mPlus));
+        Bignum mMinus = mMinus0.copy().multiplySmall(scale);
+        Bignum mPlus = mPlus0.copy().multiplySmall(scale);
+        Bignum candidate = s.copy().multiplySmall(two);
+        Bignum singleValue = s.copy().multiplySmall(single * scale / 10);
+        int below = Bignum.compare(Bignum.sum(candidate, mMinus), hundredR);
+        int above = Bignum.compare(candidate, Bignum.sum(hundredR, mPlus));
         boolean readsBack = (inclusive ? below >= 0 : below > 0) && (inclusive ? above <= 0 : above < 0);
         if (!readsBack) {
             return -1;
         }
-        return Big.compare(Big.distance(candidate, hundredR), Big.distance(singleValue, hundredR)) < 0 ? two : -1;
+        return Bignum.compare(Bignum.distance(candidate, hundredR), Bignum.distance(singleValue, hundredR)) < 0 ? two : -1;
     }
 
     /** Plain from 10^-3 up to under 10^7, computerized scientific notation outside that, as the JDK does. */
@@ -199,142 +199,6 @@ final class ShortestDecimal {
     private static void appendDigits(StringBuilder out, byte[] digits, int from, int to) {
         for (int i = from; i < to; i++) {
             out.append((char) ('0' + digits[i]));
-        }
-    }
-
-    /** Nonnegative integers in 32-bit words, least significant first, big enough for any double times 10^340. */
-    private static final class Big {
-        private static final int WORDS = 48;
-
-        private final int[] words = new int[WORDS];
-        private int length;
-
-        static Big of(long value) {
-            Big b = new Big();
-            b.words[0] = (int) value;
-            b.words[1] = (int) (value >>> 32);
-            b.length = b.words[1] != 0 ? 2 : b.words[0] != 0 ? 1 : 0;
-            return b;
-        }
-
-        Big copy() {
-            Big b = new Big();
-            System.arraycopy(words, 0, b.words, 0, length);
-            b.length = length;
-            return b;
-        }
-
-        Big shiftLeft(int bits) {
-            if (length == 0) {
-                return this;
-            }
-            int wordShift = bits >>> 5;
-            int bitShift = bits & 31;
-            // Top down, so each word is read before it's overwritten.
-            for (int i = length + wordShift; i >= wordShift; i--) {
-                int src = i - wordShift;
-                long hi = src < length ? words[src] & 0xFFFFFFFFL : 0;
-                long lo = src >= 1 && bitShift != 0 ? (words[src - 1] & 0xFFFFFFFFL) >>> 32 - bitShift : 0;
-                words[i] = (int) (hi << bitShift | lo);
-            }
-            for (int i = 0; i < wordShift; i++) {
-                words[i] = 0;
-            }
-            length += wordShift + 1;
-            trim();
-            return this;
-        }
-
-        Big multiplySmall(int m) {
-            long carry = 0;
-            for (int i = 0; i < length; i++) {
-                long p = (words[i] & 0xFFFFFFFFL) * m + carry;
-                words[i] = (int) p;
-                carry = p >>> 32;
-            }
-            if (carry != 0) {
-                words[length++] = (int) carry;
-            }
-            return this;
-        }
-
-        Big multiplyPow10(int n) {
-            for (; n >= 9; n -= 9) {
-                multiplySmall(1_000_000_000);
-            }
-            int rest = 1;
-            for (; n > 0; n--) {
-                rest *= 10;
-            }
-            return multiplySmall(rest);
-        }
-
-        /** Replaces this with this mod d and returns the quotient, which must be under 2^31. */
-        int divideSmallQuotient(Big d) {
-            int q = 0;
-            while (compare(this, d) >= 0) {
-                subtract(d);
-                q++;
-            }
-            return q;
-        }
-
-        private void subtract(Big other) {
-            long borrow = 0;
-            for (int i = 0; i < length; i++) {
-                long diff = (words[i] & 0xFFFFFFFFL) - (i < other.length ? other.words[i] & 0xFFFFFFFFL : 0) - borrow;
-                words[i] = (int) diff;
-                borrow = diff < 0 ? 1 : 0;
-            }
-            trim();
-        }
-
-        static Big sum(Big a, Big b) {
-            return sumInto(a, b, new Big());
-        }
-
-        static Big sumInto(Big a, Big b, Big result) {
-            int n = Math.max(a.length, b.length);
-            long carry = 0;
-            for (int i = 0; i < n; i++) {
-                long s = (i < a.length ? a.words[i] & 0xFFFFFFFFL : 0) + (i < b.length ? b.words[i] & 0xFFFFFFFFL : 0) + carry;
-                result.words[i] = (int) s;
-                carry = s >>> 32;
-            }
-            result.length = n;
-            if (carry != 0) {
-                result.words[result.length++] = (int) carry;
-            }
-            return result;
-        }
-
-        static Big distance(Big a, Big b) {
-            if (compare(a, b) >= 0) {
-                Big d = a.copy();
-                d.subtract(b);
-                return d;
-            }
-            Big d = b.copy();
-            d.subtract(a);
-            return d;
-        }
-
-        static int compare(Big a, Big b) {
-            if (a.length != b.length) {
-                return a.length < b.length ? -1 : 1;
-            }
-            for (int i = a.length - 1; i >= 0; i--) {
-                if (a.words[i] != b.words[i]) {
-                    return Integer.compareUnsigned(a.words[i], b.words[i]);
-                }
-            }
-            return 0;
-        }
-
-        private void trim() {
-            while (length > 0 && words[length - 1] == 0) {
-                length--;
-            }
         }
     }
 }

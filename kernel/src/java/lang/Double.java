@@ -65,6 +65,14 @@ public final class Double extends Number implements Comparable<Double> {
         return ShortestDecimal.of(value);
     }
 
+    public static double parseDouble(String s) {
+        return NearestBinary.parseDouble(s);
+    }
+
+    public static Double valueOf(String s) {
+        return valueOf(parseDouble(s));
+    }
+
     @Override
     public int compareTo(Double other) {
         return compare(value, other.value);
