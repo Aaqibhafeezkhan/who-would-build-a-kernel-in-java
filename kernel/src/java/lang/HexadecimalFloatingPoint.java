@@ -53,7 +53,7 @@ final class HexadecimalFloatingPoint {
     private static void append(StringBuilder out, char leading, long fraction, int shift, int digits) {
         out.append("0x").append(leading).append('.');
         int count = digits;
-        while (count > 1 && ((fraction >>> ((count - 1) * 4)) & 0xf) == 0) {
+        while (count > 1 && ((fraction >>> ((digits - count) * 4)) & 0xf) == 0) {
             count--;
         }
         for (int i = 0; i < count; i++) {
