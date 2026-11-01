@@ -39,6 +39,34 @@ final class FloatToString {
                 Float.MIN_NORMAL, 16777217f, 3.4e38f, 2 * Float.MIN_VALUE, 7 * Float.MIN_VALUE, Float.NaN);
     }
 
+    static String doubleHexadecimal() {
+        return joinHex(Double.longBitsToDouble(0), Double.longBitsToDouble(Long.MIN_VALUE), 1.0, -0.5, 0.1,
+                Double.MIN_VALUE, Double.longBitsToDouble(2), Double.longBitsToDouble(0x000fffffffffffffL),
+                Double.MIN_NORMAL, Double.MAX_VALUE, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, Double.NaN);
+    }
+
+    static String floatHexadecimal() {
+        return joinHexF(Float.intBitsToFloat(0), Float.intBitsToFloat(0x80000000), 1.0f, -0.5f, 0.1f,
+                Float.MIN_VALUE, Float.intBitsToFloat(2), Float.intBitsToFloat(0x007fffff),
+                Float.MIN_NORMAL, Float.MAX_VALUE, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NaN);
+    }
+
+    static String joinHex(double... values) {
+        StringBuilder sb = new StringBuilder();
+        for (double value : values) {
+            sb.append(Double.toHexString(value)).append(' ');
+        }
+        return sb.toString();
+    }
+
+    static String joinHexF(float... values) {
+        StringBuilder sb = new StringBuilder();
+        for (float value : values) {
+            sb.append(Float.toHexString(value)).append(' ');
+        }
+        return sb.toString();
+    }
+
     static String concatAndValueOf() {
         double d = 2.5;
         float f = -0.75f;

@@ -65,6 +65,10 @@ public final class Float extends Number implements Comparable<Float> {
         return ShortestDecimal.of(value);
     }
 
+    public static String toHexString(float value) {
+        return HexadecimalFloatingPoint.of(value);
+    }
+
     public static float parseFloat(String s) {
         return NearestBinary.parseFloat(s);
     }

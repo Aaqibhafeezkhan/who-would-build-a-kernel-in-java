@@ -65,6 +65,10 @@ public final class Double extends Number implements Comparable<Double> {
         return ShortestDecimal.of(value);
     }
 
+    public static String toHexString(double value) {
+        return HexadecimalFloatingPoint.of(value);
+    }
+
     public static double parseDouble(String s) {
         return NearestBinary.parseDouble(s);
     }
