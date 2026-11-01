@@ -21,7 +21,7 @@ final class HexadecimalFloatingPoint {
         }
         if (exponent == 0) {
             append(out, '0', fraction, 48, 13);
-            out.append('p').append(-1022);
+            out.append('p').append(fraction == 0 ? 0 : -1022);
         } else {
             append(out, '1', fraction, 48, 13);
             out.append('p').append(exponent - 1023);
@@ -42,7 +42,7 @@ final class HexadecimalFloatingPoint {
         }
         if (exponent == 0) {
             append(out, '0', (long) fraction << 1, 20, 6);
-            out.append('p').append(-126);
+            out.append('p').append(fraction == 0 ? 0 : -126);
         } else {
             append(out, '1', (long) fraction << 1, 20, 6);
             out.append('p').append(exponent - 127);
