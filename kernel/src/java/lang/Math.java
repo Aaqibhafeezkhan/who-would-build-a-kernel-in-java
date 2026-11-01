@@ -220,6 +220,20 @@ public final class Math {
         return Magic.sqrt(a);
     }
 
+    // HotSpot's Math versions of these are x86 intrinsics that can be an ulp off StrictMath; the
+    // spec allows either, and only StrictMath's are pinned down well enough to test against.
+    public static double exp(double a) {
+        return StrictMath.exp(a);
+    }
+
+    public static double log(double a) {
+        return StrictMath.log(a);
+    }
+
+    public static double pow(double a, double b) {
+        return StrictMath.pow(a, b);
+    }
+
     // Through long rather than roundsd, which needs SSE4.1 and QEMU's default CPU hasn't got it.
     // From 2^52 up every double is whole already; the sign copy keeps floor(-0.0) and ceil(-0.5) at -0.0.
     public static double floor(double a) {
