@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.ConcurrentModificationException;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -388,6 +389,96 @@ final class Collections2 {
             case 5: d.add(null); break;
             default: d.offer(null); break;
         }
+    }
+
+
+    static String linkedHashMapInsertionOrderAcrossResizes() {
+        Map<Integer, String> map = new LinkedHashMap<>();
+        for (int i = 0; i < 100; i++) {
+            map.put(i, "v" + i);
+        }
+        StringBuilder result = new StringBuilder();
+        for (Map.Entry<Integer, String> entry : map.entrySet()) {
+            result.append(entry.getKey()).append(',');
+        }
+        return result.toString() + " " + map.size();
+    }
+
+    static String linkedHashMapRemovalReinsertionAndReplacement() {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        map.put("first", 1);
+        map.put("second", 2);
+        map.put("third", 3);
+        map.put("second", 22);
+        map.remove("first");
+        map.put("first", 11);
+        return map.keySet() + " " + map + " " + map.values();
+    }
+
+    static String linkedHashMapNullsAndIteratorRemoval() {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        map.put(null, null);
+        map.put("one", 1);
+        map.put("two", 2);
+        map.put("three", 3);
+        for (Iterator<Map.Entry<String, Integer>> it = map.entrySet().iterator(); it.hasNext();) {
+            if ("one".equals(it.next().getKey())) {
+                it.remove();
+            }
+        }
+        return map + " " + map.containsKey(null) + " " + map.containsValue(null);
+    }
+
+
+    static String linkedHashMapCopyConstructorPreservesOrder() {
+        Map<String, Integer> source = new LinkedHashMap<>();
+        source.put("third", 3);
+        source.put("first", 1);
+        source.put("second", 2);
+        Map<String, Integer> copy = new LinkedHashMap<>(source);
+        return copy + " " + copy.keySet();
+    }
+
+    static String linkedHashMapAccessOrder() {
+        LinkedHashMap<String, Integer> map = new LinkedHashMap<>(16, true);
+        map.put("a", 1);
+        map.put("b", 2);
+        map.put("c", 3);
+        map.get("a");
+        map.get("b");
+        map.put("c", 30);
+        return map.keySet().toString();
+    }
+
+    static String linkedHashMapEldestEntryRemoval() {
+        LinkedHashMap<Integer, Integer> map = new LinkedHashMap<>(4) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Integer, Integer> eldest) {
+                return size() > 3;
+            }
+        };
+        for (int i = 1; i <= 5; i++) {
+            map.put(i, i * 10);
+        }
+        return map + " " + map.keySet();
+    }
+
+    static String linkedHashMapFailFastAndClear() {
+        LinkedHashMap<Integer, Integer> map = new LinkedHashMap<>();
+        map.put(1, 1);
+        map.put(2, 2);
+        Iterator<Integer> iterator = map.keySet().iterator();
+        iterator.next();
+        map.put(3, 3);
+        String failFast = "none";
+        try {
+            iterator.next();
+        } catch (ConcurrentModificationException e) {
+            failFast = "cme";
+        }
+        map.clear();
+        map.put(4, 4);
+        return failFast + " " + map;
     }
 
     static String selfReferenceToString() {

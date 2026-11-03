@@ -11,7 +11,7 @@ public class HashMap<K, V> extends AbstractMap<K, V> {
     static final int MAXIMUM_CAPACITY = 1 << 30;
     static final int DEFAULT_CAPACITY = 16;
 
-    static final class Node<K, V> implements Map.Entry<K, V> {
+    static class Node<K, V> implements Map.Entry<K, V> {
         final int hash;
         final K key;
         V value;
@@ -57,11 +57,11 @@ public class HashMap<K, V> extends AbstractMap<K, V> {
         }
     }
 
-    private Node<K, V>[] table;
-    private int size;
-    private int modCount;
+    Node<K, V>[] table;
+    int size;
+    int modCount;
     /** The next size to resize at; before the table exists, the initial capacity (0 for the default). */
-    private int threshold;
+    int threshold;
 
     public HashMap() {
     }
@@ -108,6 +108,19 @@ public class HashMap<K, V> extends AbstractMap<K, V> {
         }
     }
 
+    Node<K, V> newNode(int hash, K key, V value, Node<K, V> next) {
+        return new Node<>(hash, key, value, next);
+    }
+
+    void afterNodeAccess(Node<K, V> node) {
+    }
+
+    void afterNodeInsertion(boolean evict) {
+    }
+
+    void afterNodeRemoval(Node<K, V> node) {
+    }
+
     @Override
     public int size() {
         return size;
@@ -116,7 +129,11 @@ public class HashMap<K, V> extends AbstractMap<K, V> {
     @Override
     public V get(Object key) {
         Node<K, V> e = getNode(key);
-        return e == null ? null : e.value;
+        if (e == null) {
+            return null;
+        }
+        afterNodeAccess(e);
+        return e.value;
     }
 
     @Override
@@ -147,16 +164,17 @@ public class HashMap<K, V> extends AbstractMap<K, V> {
         int i = (table.length - 1) & h;
         Node<K, V> e = table[i];
         if (e == null) {
-            table[i] = new Node<>(h, key, value, null);
+            table[i] = newNode(h, key, value, null);
         } else {
             while (true) {
                 if (e.hash == h && Objects.equals(key, e.key)) {
                     V old = e.value;
                     e.value = value;
+                    afterNodeAccess(e);
                     return old;
                 }
                 if (e.next == null) {
-                    e.next = new Node<>(h, key, value, null);
+                    e.next = newNode(h, key, value, null);
                     break;
                 }
                 e = e.next;
@@ -166,6 +184,7 @@ public class HashMap<K, V> extends AbstractMap<K, V> {
         if (++size > threshold) {
             resize();
         }
+        afterNodeInsertion(true);
         return null;
     }
 
@@ -229,7 +248,7 @@ public class HashMap<K, V> extends AbstractMap<K, V> {
         return e == null ? null : e.value;
     }
 
-    private Node<K, V> removeNode(Object key) {
+    Node<K, V> removeNode(Object key) {
         Node<K, V>[] tab = table;
         if (tab == null) {
             return null;
@@ -246,6 +265,7 @@ public class HashMap<K, V> extends AbstractMap<K, V> {
                 }
                 modCount++;
                 size--;
+                afterNodeRemoval(e);
                 return e;
             }
         }
