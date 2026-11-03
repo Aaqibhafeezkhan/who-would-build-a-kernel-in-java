@@ -20,7 +20,8 @@ public class LinkedHashMap<K, V> extends HashMap<K, V> {
     private final boolean accessOrder;
 
     public LinkedHashMap() {
-        this(false);
+        super();
+        this.accessOrder = false;
     }
 
     public LinkedHashMap(int initialCapacity) {
