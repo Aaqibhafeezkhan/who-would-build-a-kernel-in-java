@@ -12,6 +12,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.PriorityQueue;
 import java.util.Set;
 
 /** java.util against HotSpot: results, iteration order, toString shapes and exception messages. */
@@ -336,6 +337,45 @@ final class Collections2 {
                 .append(before.equals(after) ? "unchanged" : "changed:" + after).append(';');
         }
         return sb.toString();
+    }
+
+    static String priorityQueuePollsInNaturalOrder() {
+        PriorityQueue<Integer> q = new PriorityQueue<>();
+        int[] values = {7, 1, 9, 2, 8, 3, 6, 4, 5, 0};
+        for (int value : values) q.add(value);
+        StringBuilder result = new StringBuilder();
+        while (!q.isEmpty()) result.append(q.poll()).append(',');
+        return result.toString();
+    }
+
+    static String priorityQueueComparatorAndGrowth() {
+        PriorityQueue<Integer> q = new PriorityQueue<>(Comparator.reverseOrder());
+        for (int i = 0; i < 40; i++) q.offer((i * 17) % 41);
+        StringBuilder result = new StringBuilder();
+        while (!q.isEmpty()) result.append(q.remove()).append(',');
+        return result.toString();
+    }
+
+    static String priorityQueueHeapOrderToString() {
+        PriorityQueue<Integer> q = new PriorityQueue<>();
+        for (int value : new int[] {5, 1, 4, 2, 3}) q.add(value);
+        q.poll();
+        q.poll();
+        return q.toString() + " " + q.peek() + " " + q.size();
+    }
+
+    static String priorityQueueEmptyAndClear() {
+        PriorityQueue<Integer> q = new PriorityQueue<>();
+        String result = q.peek() + " " + q.poll() + " ";
+        try {
+            q.remove();
+        } catch (NoSuchElementException e) {
+            result += "nse ";
+        }
+        q.add(2);
+        q.add(1);
+        q.clear();
+        return result + q.isEmpty() + " " + q.size();
     }
 
     private static void addNull(Deque<String> d, int which) {
