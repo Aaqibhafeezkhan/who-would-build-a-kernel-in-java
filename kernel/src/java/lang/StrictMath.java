@@ -11,7 +11,7 @@ package java.lang;
 
 /**
  * fdlibm's exp, log and pow, translated from Sun's C (e_exp.c, e_log.c, e_pow.c, s_scalbn.c), which
- * is what StrictMath is specified to return bit for bit. The C works on the high and low 32-bit
+ * is what StrictMath is specified to return bit for bit; the trig functions are in Trigonometry. The C works on the high and low 32-bit
  * words of a double, so the translation does too, to keep every rounding step the same.
  */
 public final class StrictMath {
@@ -386,7 +386,35 @@ public final class StrictMath {
         return s * z;
     }
 
-    private static double scalbn(double x, int n) {
+    public static double sin(double a) {
+        return Trigonometry.sin(a);
+    }
+
+    public static double cos(double a) {
+        return Trigonometry.cos(a);
+    }
+
+    public static double tan(double a) {
+        return Trigonometry.tan(a);
+    }
+
+    public static double asin(double a) {
+        return Trigonometry.asin(a);
+    }
+
+    public static double acos(double a) {
+        return Trigonometry.acos(a);
+    }
+
+    public static double atan(double a) {
+        return Trigonometry.atan(a);
+    }
+
+    public static double atan2(double y, double x) {
+        return Trigonometry.atan2(y, x);
+    }
+
+    static double scalbn(double x, int n) {
         int hx = hi(x);
         int lx = lo(x);
         int k = (hx & 0x7ff00000) >> 20;
@@ -421,24 +449,24 @@ public final class StrictMath {
         return withHi(x, (hx & 0x800fffff) | (k << 20)) * TWO_M54;
     }
 
-    private static int hi(double x) {
+    static int hi(double x) {
         return (int) (Double.doubleToRawLongBits(x) >> 32);
     }
 
-    private static int lo(double x) {
+    static int lo(double x) {
         return (int) Double.doubleToRawLongBits(x);
     }
 
-    private static double withHi(double x, int hi) {
+    static double withHi(double x, int hi) {
         return Double.longBitsToDouble((long) hi << 32 | Double.doubleToRawLongBits(x) & 0xffffffffL);
     }
 
-    private static double fromHi(int hi) {
+    static double fromHi(int hi) {
         return Double.longBitsToDouble((long) hi << 32);
     }
 
     /** x with its low word cleared. */
-    private static double highWord(double x) {
+    static double highWord(double x) {
         return Double.longBitsToDouble(Double.doubleToRawLongBits(x) & 0xffffffff00000000L);
     }
 }
