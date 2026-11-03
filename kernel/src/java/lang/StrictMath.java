@@ -61,6 +61,25 @@ public final class StrictMath {
     private static final double CP_H = 9.61796700954437255859e-01;
     private static final double CP_L = -7.02846165095275826516e-09;
 
+    private static final double Q1 = -3.33333333333331316428e-02;
+    private static final double Q2 = 1.58730158725481460165e-03;
+    private static final double Q3 = -7.93650757867487942473e-05;
+    private static final double Q4 = 4.00821782732936239552e-06;
+    private static final double Q5 = -2.01099218183624371326e-07;
+
+    private static final double INV_LN10 = 4.34294481903251816668e-01;
+    private static final double LOG10_2HI = 3.01029995663611771306e-01;
+    private static final double LOG10_2LO = 3.69423907715893078616e-13;
+
+    // cbrt's first guess: (682 and 664 - 0.03306235651) * 2^20, for normal and subnormal x.
+    private static final int CBRT_B1 = 715094163;
+    private static final int CBRT_B2 = 696219795;
+    private static final double CBRT_C = 5.42857142857142815906e-01;
+    private static final double CBRT_D = -7.05306122448979611050e-01;
+    private static final double CBRT_E = 1.41428571428571436819e+00;
+    private static final double CBRT_F = 1.60714285714285720630e+00;
+    private static final double CBRT_G = 3.57142857142857150787e-01;
+
     // fdlibm divides by a variable zero so the C compiler can't fold the infinities and NaNs away.
     private static double zero = 0.0;
 
@@ -384,6 +403,387 @@ public final class StrictMath {
             z = withHi(z, j);
         }
         return s * z;
+    }
+
+    public static double log10(double x) {
+        int hx = hi(x);
+        int lx = lo(x);
+        int k = 0;
+        if (hx < 0x00100000) {
+            if (((hx & 0x7fffffff) | lx) == 0) {
+                return -TWO54 / zero;
+            }
+            if (hx < 0) {
+                return (x - x) / zero;
+            }
+            k -= 54;
+            x *= TWO54;
+            hx = hi(x);
+        }
+        if (hx >= 0x7ff00000) {
+            return x + x;
+        }
+        k += (hx >> 20) - 1023;
+        int i = k >>> 31;
+        hx = (hx & 0x000fffff) | ((0x3ff - i) << 20);
+        double y = k + i;
+        x = withHi(x, hx);
+        double z = y * LOG10_2LO + INV_LN10 * log(x);
+        return z + y * LOG10_2HI;
+    }
+
+    public static double expm1(double x) {
+        int hx = hi(x);
+        int xsb = hx & 0x80000000;
+        hx &= 0x7fffffff;
+        if (hx >= 0x4043687A) {
+            if (hx >= 0x40862E42) {
+                if (hx >= 0x7ff00000) {
+                    if (((hx & 0xfffff) | lo(x)) != 0) {
+                        return x + x;
+                    }
+                    return xsb == 0 ? x : -1.0;
+                }
+                if (x > EXP_OVERFLOW) {
+                    return HUGE * HUGE;
+                }
+            }
+            if (xsb != 0 && x + TINY < 0.0) {
+                return TINY - 1.0;
+            }
+        }
+        double c = 0;
+        int k;
+        if (hx > 0x3fd62e42) {
+            double hi;
+            double lo;
+            if (hx < 0x3FF0A2B2) {
+                if (xsb == 0) {
+                    hi = x - LN2_HI;
+                    lo = LN2_LO;
+                    k = 1;
+                } else {
+                    hi = x + LN2_HI;
+                    lo = -LN2_LO;
+                    k = -1;
+                }
+            } else {
+                k = (int) (INV_LN2 * x + (xsb == 0 ? 0.5 : -0.5));
+                double t = k;
+                hi = x - t * LN2_HI;
+                lo = t * LN2_LO;
+            }
+            x = hi - lo;
+            c = (hi - x) - lo;
+        } else if (hx < 0x3c900000) {
+            double t = HUGE + x;
+            return x - (t - (HUGE + x));
+        } else {
+            k = 0;
+        }
+        double hfx = 0.5 * x;
+        double hxs = x * hfx;
+        double r1 = 1.0 + hxs * (Q1 + hxs * (Q2 + hxs * (Q3 + hxs * (Q4 + hxs * Q5))));
+        double t = 3.0 - r1 * hfx;
+        double e = hxs * ((r1 - t) / (6.0 - x * t));
+        if (k == 0) {
+            return x - (x * e - hxs);
+        }
+        e = (x * (e - c) - c);
+        e -= hxs;
+        if (k == -1) {
+            return 0.5 * (x - e) - 0.5;
+        }
+        if (k == 1) {
+            if (x < -0.25) {
+                return -2.0 * (e - (x + 0.5));
+            }
+            return 1.0 + 2.0 * (x - e);
+        }
+        double y;
+        if (k <= -2 || k > 56) {
+            y = 1.0 - (e - x);
+            y = withHi(y, hi(y) + (k << 20));
+            return y - 1.0;
+        }
+        if (k < 20) {
+            t = fromHi(0x3ff00000 - (0x200000 >> k));
+            y = t - (e - x);
+        } else {
+            t = fromHi((0x3ff - k) << 20);
+            y = x - (e + t);
+            y += 1.0;
+        }
+        return withHi(y, hi(y) + (k << 20));
+    }
+
+    public static double log1p(double x) {
+        int hx = hi(x);
+        int ax = hx & 0x7fffffff;
+        int k = 1;
+        int hu = 0;
+        double f = 0;
+        double c = 0;
+        if (hx < 0x3FDA827A) {
+            if (ax >= 0x3ff00000) {
+                if (x == -1.0) {
+                    return -TWO54 / zero;
+                }
+                // The C computes a NaN; HotSpot returns the canonical one.
+                return Double.NaN;
+            }
+            if (ax < 0x3e200000) {
+                if (TWO54 + x > zero && ax < 0x3c900000) {
+                    return x;
+                }
+                return x - x * x * 0.5;
+            }
+            if (hx > 0 || hx <= 0xbfd2bec3) {
+                k = 0;
+                f = x;
+                hu = 1;
+            }
+        }
+        if (hx >= 0x7ff00000) {
+            return x + x;
+        }
+        if (k != 0) {
+            double u;
+            if (hx < 0x43400000) {
+                u = 1.0 + x;
+                hu = hi(u);
+                k = (hu >> 20) - 1023;
+                c = k > 0 ? 1.0 - (u - x) : x - (u - 1.0);
+                c /= u;
+            } else {
+                u = x;
+                hu = hi(u);
+                k = (hu >> 20) - 1023;
+                c = 0;
+            }
+            hu &= 0x000fffff;
+            if (hu < 0x6a09e) {
+                u = withHi(u, hu | 0x3ff00000);
+            } else {
+                k += 1;
+                u = withHi(u, hu | 0x3fe00000);
+                hu = (0x00100000 - hu) >> 2;
+            }
+            f = u - 1.0;
+        }
+        double hfsq = 0.5 * f * f;
+        if (hu == 0) {
+            if (f == zero) {
+                if (k == 0) {
+                    return zero;
+                }
+                c += k * LN2_LO;
+                return k * LN2_HI + c;
+            }
+            double r = hfsq * (1.0 - 0.66666666666666666 * f);
+            if (k == 0) {
+                return f - r;
+            }
+            return k * LN2_HI - ((r - (k * LN2_LO + c)) - f);
+        }
+        double s = f / (2.0 + f);
+        double z = s * s;
+        double r = z * (LG1 + z * (LG2 + z * (LG3 + z * (LG4 + z * (LG5 + z * (LG6 + z * LG7))))));
+        if (k == 0) {
+            return f - (hfsq - s * (hfsq + r));
+        }
+        return k * LN2_HI - ((hfsq - (s * (hfsq + r) + (k * LN2_LO + c))) - f);
+    }
+
+    public static double sinh(double x) {
+        int jx = hi(x);
+        int ix = jx & 0x7fffffff;
+        if (ix >= 0x7ff00000) {
+            return x + x;
+        }
+        double h = jx < 0 ? -0.5 : 0.5;
+        if (ix < 0x40360000) {
+            if (ix < 0x3e300000 && 1.0e307 + x > 1.0) {
+                return x;
+            }
+            double t = expm1(Math.abs(x));
+            if (ix < 0x3ff00000) {
+                return h * (2.0 * t - t * t / (t + 1.0));
+            }
+            return h * (t + t / (t + 1.0));
+        }
+        if (ix < 0x40862E42) {
+            return h * exp(Math.abs(x));
+        }
+        if (belowCoshOverflow(ix, lo(x))) {
+            double w = exp(0.5 * Math.abs(x));
+            double t = h * w;
+            return t * w;
+        }
+        return x * 1.0e307;
+    }
+
+    public static double cosh(double x) {
+        int ix = hi(x) & 0x7fffffff;
+        if (ix >= 0x7ff00000) {
+            return x * x;
+        }
+        if (ix < 0x3fd62e43) {
+            double t = expm1(Math.abs(x));
+            double w = 1.0 + t;
+            if (ix < 0x3c800000) {
+                return w;
+            }
+            return 1.0 + (t * t) / (w + w);
+        }
+        if (ix < 0x40360000) {
+            double t = exp(Math.abs(x));
+            return 0.5 * t + 0.5 / t;
+        }
+        if (ix < 0x40862E42) {
+            return 0.5 * exp(Math.abs(x));
+        }
+        if (belowCoshOverflow(ix, lo(x))) {
+            double w = exp(0.5 * Math.abs(x));
+            double t = 0.5 * w;
+            return t * w;
+        }
+        return HUGE * HUGE;
+    }
+
+    /** |x| up to 0x408633ce_8fb9f87d, past which sinh and cosh overflow even computed as exp(|x|/2)^2 / 2. */
+    private static boolean belowCoshOverflow(int ix, int lx) {
+        return ix < 0x408633CE || ix == 0x408633ce && Integer.compareUnsigned(lx, 0x8fb9f87d) <= 0;
+    }
+
+    public static double tanh(double x) {
+        int jx = hi(x);
+        int ix = jx & 0x7fffffff;
+        if (ix >= 0x7ff00000) {
+            return jx >= 0 ? 1.0 / x + 1.0 : 1.0 / x - 1.0;
+        }
+        double z;
+        if (ix < 0x40360000) {
+            if (ix < 0x3c800000) {
+                return x * (1.0 + x);
+            }
+            if (ix >= 0x3ff00000) {
+                double t = expm1(2.0 * Math.abs(x));
+                z = 1.0 - 2.0 / (t + 2.0);
+            } else {
+                double t = expm1(-2.0 * Math.abs(x));
+                z = -t / (t + 2.0);
+            }
+        } else {
+            z = 1.0 - TINY;
+        }
+        return jx >= 0 ? z : -z;
+    }
+
+    public static double cbrt(double x) {
+        int hx = hi(x);
+        int sign = hx & 0x80000000;
+        hx ^= sign;
+        // HotSpot hands back a NaN untouched, where the C's x + x would quiet a signaling one.
+        if (hx >= 0x7ff00000) {
+            return x;
+        }
+        if ((hx | lo(x)) == 0) {
+            return x;
+        }
+        x = withHi(x, hx);
+        // A first guess good to 5 bits from dividing the exponent by 3, then 23 bits, then 53.
+        double t;
+        if (hx < 0x00100000) {
+            t = fromHi(0x43500000) * x;
+            t = withHi(t, hi(t) / 3 + CBRT_B2);
+        } else {
+            t = fromHi(hx / 3 + CBRT_B1);
+        }
+        double r = t * t / x;
+        double s = CBRT_C + r * t;
+        t *= CBRT_G + CBRT_F / (s + CBRT_E + CBRT_D / s);
+        t = fromHi(hi(t) + 1);
+        s = t * t;
+        r = x / s;
+        double w = t + t;
+        r = (r - t) / (w + r);
+        t = t + t * r;
+        return withHi(t, hi(t) | sign);
+    }
+
+    public static double hypot(double x, double y) {
+        int ha = hi(x) & 0x7fffffff;
+        int hb = hi(y) & 0x7fffffff;
+        double a;
+        double b;
+        if (hb > ha) {
+            a = y;
+            b = x;
+            int j = ha;
+            ha = hb;
+            hb = j;
+        } else {
+            a = x;
+            b = y;
+        }
+        a = withHi(a, ha);
+        b = withHi(b, hb);
+        if (ha - hb > 0x3c00000) {
+            return a + b;
+        }
+        int k = 0;
+        if (ha > 0x5f300000) {
+            if (ha >= 0x7ff00000) {
+                double w = a + b;
+                if (((ha & 0xfffff) | lo(a)) == 0) {
+                    w = a;
+                }
+                if (((hb ^ 0x7ff00000) | lo(b)) == 0) {
+                    w = b;
+                }
+                return w;
+            }
+            ha -= 0x25800000;
+            hb -= 0x25800000;
+            k += 600;
+            a = withHi(a, ha);
+            b = withHi(b, hb);
+        }
+        if (hb < 0x20b00000) {
+            if (hb <= 0x000fffff) {
+                if ((hb | lo(b)) == 0) {
+                    return a;
+                }
+                double t1 = fromHi(0x7fd00000);
+                b *= t1;
+                a *= t1;
+                k -= 1022;
+            } else {
+                ha += 0x25800000;
+                hb += 0x25800000;
+                k -= 600;
+                a = withHi(a, ha);
+                b = withHi(b, hb);
+            }
+        }
+        double w = a - b;
+        if (w > b) {
+            double t1 = fromHi(ha);
+            double t2 = a - t1;
+            w = Math.sqrt(t1 * t1 - (b * (-b) - t2 * (a + t1)));
+        } else {
+            a = a + a;
+            double y1 = fromHi(hb);
+            double y2 = b - y1;
+            double t1 = fromHi(ha + 0x00100000);
+            double t2 = a - t1;
+            w = Math.sqrt(t1 * y1 - (w * (-w) - (t1 * y2 + t2 * b)));
+        }
+        if (k != 0) {
+            return fromHi(0x3ff00000 + (k << 20)) * w;
+        }
+        return w;
     }
 
     public static double sin(double a) {

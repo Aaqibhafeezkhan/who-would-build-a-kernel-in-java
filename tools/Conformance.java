@@ -70,8 +70,9 @@ public class Conformance {
         Harness.compileKernel(kernelClasses, List.of(TESTS, gen));
         Path esp = Harness.buildImage(kernelClasses, PACKAGE.replace('.', '/') + "/Main.main", OUT);
         Path serial = OUT.resolve("serial.log");
+        // The GC-stress run takes about 150 s on a fast CI runner and over twice that on a slow one.
         int boot = Harness.runStatus(OUT.resolve("boot.txt"), "tools/boot-test.sh", esp.toString(),
-                serial.toString(), DONE, "300");
+                serial.toString(), DONE, "600");
 
         Map<String, String> actual = parse(serial);
         List<String> failures = new ArrayList<>();

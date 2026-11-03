@@ -586,10 +586,10 @@ prints what HotSpot does: the shortest digits that read back as the same double,
 from Burger and Dybvig's digit generation on exact integers (`java.lang.ShortestDecimal`).
 `Double.parseDouble` goes the other way on the same integers (`java.lang.NearestBinary`): it rounds
 the exact decimal to the nearest double, and `Float.parseFloat` rounds straight to a float rather
-than through a double, which would round twice. `StrictMath.exp`, `log`, `pow` and the trig
-functions are fdlibm's C translated line for line, and `Math`'s call them: HotSpot's `Math` versions
-are intrinsics that can be an ulp off, so only `StrictMath` gives the conformance suite something
-exact to compare. Not yet: the hyperbolic functions, `log10`, `expm1`, `log1p`, `cbrt` and `hypot`.
+than through a double, which would round twice. `StrictMath`'s transcendental functions are
+fdlibm's C translated line for line, and `Math`'s call them: HotSpot's `Math` versions are
+intrinsics that can be an ulp off, so only `StrictMath` gives the conformance suite something exact
+to compare.
 
 String concatenation works because the kernel compiles with `javac -XDstringConcat=inline`, which
 turns `+` into `StringBuilder` calls instead of an `invokedynamic`. Every place that compiles

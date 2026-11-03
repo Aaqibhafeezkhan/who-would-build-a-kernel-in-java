@@ -262,6 +262,38 @@ public final class Math {
         return StrictMath.atan2(y, x);
     }
 
+    public static double log10(double a) {
+        return StrictMath.log10(a);
+    }
+
+    public static double expm1(double a) {
+        return StrictMath.expm1(a);
+    }
+
+    public static double log1p(double a) {
+        return StrictMath.log1p(a);
+    }
+
+    public static double sinh(double a) {
+        return StrictMath.sinh(a);
+    }
+
+    public static double cosh(double a) {
+        return StrictMath.cosh(a);
+    }
+
+    public static double tanh(double a) {
+        return StrictMath.tanh(a);
+    }
+
+    public static double cbrt(double a) {
+        return StrictMath.cbrt(a);
+    }
+
+    public static double hypot(double x, double y) {
+        return StrictMath.hypot(x, y);
+    }
+
     // Through long rather than roundsd, which needs SSE4.1 and QEMU's default CPU hasn't got it.
     // From 2^52 up every double is whole already; the sign copy keeps floor(-0.0) and ceil(-0.5) at -0.0.
     public static double floor(double a) {
