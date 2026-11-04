@@ -33,6 +33,13 @@ public class LinkedHashMap<K, V> extends HashMap<K, V> {
         this.accessOrder = accessOrder;
     }
 
+    public LinkedHashMap(int initialCapacity, float loadFactor, boolean accessOrder) {
+        this(initialCapacity, accessOrder);
+        if (loadFactor <= 0.0f || loadFactor != loadFactor) {
+            throw new IllegalArgumentException("Illegal load factor: " + loadFactor);
+        }
+    }
+
     public LinkedHashMap(Map<? extends K, ? extends V> map) {
         super(map);
         this.accessOrder = false;
