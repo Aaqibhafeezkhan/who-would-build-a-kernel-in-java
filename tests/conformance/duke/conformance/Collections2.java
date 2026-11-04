@@ -440,7 +440,7 @@ final class Collections2 {
     }
 
     static String linkedHashMapAccessOrder() {
-        LinkedHashMap<String, Integer> map = new LinkedHashMap<>(16, true);
+        LinkedHashMap<String, Integer> map = new LinkedHashMap<>(16, 0.75f, true);
         map.put("a", 1);
         map.put("b", 2);
         map.put("c", 3);
