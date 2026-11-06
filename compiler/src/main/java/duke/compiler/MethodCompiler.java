@@ -951,17 +951,23 @@ final class MethodCompiler {
         a.push(RAX);
     }
 
-    /** Lambdas become a static call to a factory on a class LambdaCompiler generates now. */
+    /**
+     * Lambdas become a static call to a factory on a class LambdaCompiler generates now, and a
+     * record's equals, hashCode and toString a static call to a method ObjectMethodsCompiler generates.
+     */
     private void invokeDynamic(InvokeDynamicInstruction indy) {
         if (indy.bootstrapMethod().owner().displayName().equals("StringConcatFactory")) {
             throw error("string concatenation compiled to invokedynamic; compile the kernel with javac -XDstringConcat=inline");
         }
-        if (!LambdaCompiler.isLambda(indy)) {
+        boolean lambda = LambdaCompiler.isLambda(indy);
+        if (!lambda && !ObjectMethodsCompiler.isObjectMethods(indy)) {
             throw error("unsupported invokedynamic bootstrap " + indy.bootstrapMethod().owner().displayName());
         }
         ClassPool.ResolvedMethod factory;
         try {
-            factory = program.lambdas().proxyFor(indy, method.ownerName());
+            factory = lambda
+                    ? program.lambdas().proxyFor(indy, method.ownerName())
+                    : program.objectMethods().methodFor(indy, method.ownerName());
         } catch (CompileException e) {
             throw error(e.getMessage());
         }

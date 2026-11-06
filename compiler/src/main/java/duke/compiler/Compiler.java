@@ -135,6 +135,7 @@ public final class Compiler {
     private final Map<Vtables.Key, Integer> selectors = new LinkedHashMap<>();
     private final Vtables vtables;
     private final LambdaCompiler lambdas;
+    private final ObjectMethodsCompiler objectMethods;
     private int multiArraySites;
     private boolean interruptStubs;
     private boolean syscallEntry;
@@ -176,6 +177,7 @@ public final class Compiler {
         this.layouts = new Layouts(pool);
         this.vtables = new Vtables(pool);
         this.lambdas = new LambdaCompiler(pool);
+        this.objectMethods = new ObjectMethodsCompiler(pool);
     }
 
     private record VirtualCall(String owner, String name, String descriptor) {}
@@ -316,6 +318,10 @@ public final class Compiler {
 
     LambdaCompiler lambdas() {
         return lambdas;
+    }
+
+    ObjectMethodsCompiler objectMethods() {
+        return objectMethods;
     }
 
     static String methodSymbol(String owner, String name, String descriptor) {

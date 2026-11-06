@@ -466,6 +466,13 @@ implementation are emitted as ordinary bytecode in the generated method.
 
 `java.lang.invoke` in the kernel is stubs: javac needs the names to exist, nothing calls them.
 
+Records work the same way. javac compiles a record's `equals`, `hashCode` and `toString` to an
+`invokedynamic` on `java.lang.runtime.ObjectMethods`, naming the component fields.
+`ObjectMethodsCompiler` generates `Caller$$ObjectMethods$N` with one static method doing what
+`ObjectMethods` would: the JDK's `Point[x=1, y=2]` format, `Float.compare` and `Double.compare`
+for floating-point components, and `31 * h + hash` over the components. `ObjectMethods` is a stub
+too.
+
 ### Class initialization
 
 Classes initialize lazily, with JVM semantics (JVMS 5.5): on the first `new`, static field access
