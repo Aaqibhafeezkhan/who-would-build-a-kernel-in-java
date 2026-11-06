@@ -54,11 +54,13 @@ import java.lang.classfile.instruction.TypeCheckInstruction;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.AccessFlag;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Template code generator: each bytecode becomes a fixed x86 sequence operating on the machine
@@ -96,7 +98,10 @@ final class MethodCompiler {
     /** Code offset from which a synchronized method holds its monitor. */
     private int monitorHeldFrom;
     private static final Mem MONITOR_SLOT = Mem.at(RBP, -8);
+    private CodeAttribute code;
     private List<CodeElement> elements;
+    /** Bytecode offset of the instruction being compiled. */
+    private int bci;
     private FrameTypes.State[] states;
     /** Slot kinds before the instruction being compiled; the prologue sees the entry state. */
     private FrameTypes.State state;
@@ -120,7 +125,7 @@ final class MethodCompiler {
         if (method.is(AccessFlag.ABSTRACT)) {
             throw error("abstract method reached without virtual dispatch support");
         }
-        CodeAttribute code = (CodeAttribute) method.method().code().orElseThrow();
+        code = (CodeAttribute) method.method().code().orElseThrow();
         argSlots = argSlots(method.method().methodTypeSymbol()) + (method.is(AccessFlag.STATIC) ? 0 : 1);
         extraLocals = code.maxLocals() - argSlots;
         synchronizedMethod = method.is(AccessFlag.SYNCHRONIZED);
@@ -160,6 +165,7 @@ final class MethodCompiler {
                     state = states[index];
                     consumed = 0;
                     instruction(i);
+                    bci += i.sizeInBytes();
                 }
                 default -> { }
             }
@@ -676,10 +682,7 @@ final class MethodCompiler {
      * The table holds 32-bit offsets from its own start, so it needs no relocations.
      */
     private void tableSwitch(TableSwitchInstruction t) {
-        Map<Integer, Label> targets = new HashMap<>();
-        for (SwitchCase c : t.cases()) {
-            targets.put(c.caseValue(), c.target());
-        }
+        List<Label> targets = tableTargets(t);
         X64.Label table = new X64.Label();
         a.pop(RAX);
         // Always emitted: the 32-bit sub also clears rax's upper half for the index below.
@@ -691,9 +694,30 @@ final class MethodCompiler {
         a.alu(Alu.ADD, true, RAX, RCX);
         a.jmp(RAX);
         a.bind(table);
-        for (int i = 0; i <= t.highValue() - t.lowValue(); i++) {
-            a.tableEntry(table, label(targets.getOrDefault(t.lowValue() + i, t.defaultTarget())));
+        for (Label target : targets) {
+            a.tableEntry(table, label(target));
         }
+    }
+
+    /**
+     * The table's targets, read from the bytecode. TableSwitchInstruction.cases() counts up to the
+     * high value with an int, so it never stops when that's Integer.MAX_VALUE.
+     */
+    private List<Label> tableTargets(TableSwitchInstruction t) {
+        Map<Integer, Label> labelsByBci = new HashMap<>();
+        for (CodeElement e : elements) {
+            if (e instanceof LabelTarget target) {
+                labelsByBci.put(code.labelToBci(target.label()), target.label());
+            }
+        }
+        // After the opcode, padding to a multiple of 4, then the default, low and high words.
+        int entries = ((bci + 4) & ~3) + 12;
+        ByteBuffer bytes = ByteBuffer.wrap(code.codeArray());
+        List<Label> targets = new ArrayList<>();
+        for (int i = 0; i <= t.highValue() - t.lowValue(); i++) {
+            targets.add(Objects.requireNonNull(labelsByBci.get(bci + bytes.getInt(entries + 4 * i))));
+        }
+        return targets;
     }
 
     /** Compare chain for lookupswitch, whose keys are sparse. */

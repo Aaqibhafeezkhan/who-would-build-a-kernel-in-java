@@ -104,6 +104,23 @@ final class ControlFlow {
         return out.toString();
     }
 
+    /** The JDK's classfile API can't list this table's cases (#251). */
+    static String switchAtIntegerMaximum() {
+        StringBuilder out = new StringBuilder();
+        int[] keys = {Integer.MAX_VALUE - 4, Integer.MAX_VALUE - 3, Integer.MAX_VALUE - 1, Integer.MAX_VALUE,
+                Integer.MIN_VALUE, 0};
+        for (int key : keys) {
+            switch (key) {
+                case Integer.MAX_VALUE - 3 -> out.append('w');
+                case Integer.MAX_VALUE - 2 -> out.append('x');
+                case Integer.MAX_VALUE - 1 -> out.append('y');
+                case Integer.MAX_VALUE -> out.append('z');
+                default -> out.append('.');
+            }
+        }
+        return out.toString();
+    }
+
     /** Narrowed from a long with high bits set, so the key's register had more than 32 bits in it. */
     static int switchOnNarrowedLong() {
         int total = 0;
