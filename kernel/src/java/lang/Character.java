@@ -124,6 +124,10 @@ public final class Character implements Comparable<Character> {
         return x - y;
     }
 
+    public static int hashCode(char value) {
+        return value;
+    }
+
     public char charValue() {
         return value;
     }

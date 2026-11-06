@@ -59,6 +59,22 @@ final class Boxing {
         return h;
     }
 
+    // The static hashCode(value) overloads widen to int, so a negative byte or short must come back
+    // sign-extended rather than zero-padded.
+    static int staticHashCodes() {
+        int h = 0;
+        for (byte b : new byte[] {-1, (byte) 0xAA, Byte.MIN_VALUE, Byte.MAX_VALUE}) {
+            h = 31 * h + Byte.hashCode(b);
+        }
+        for (short s : new short[] {-1, (short) 0xAAAA, Short.MIN_VALUE, Short.MAX_VALUE}) {
+            h = 31 * h + Short.hashCode(s);
+        }
+        for (char c : new char[] {'A', '\u007f', Character.MAX_VALUE}) {
+            h = 31 * h + Character.hashCode(c);
+        }
+        return h;
+    }
+
     static int equalsAcrossTypes() {
         Object i = 5;
         Object l = 5L;
