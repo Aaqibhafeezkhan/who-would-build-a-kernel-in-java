@@ -15,6 +15,7 @@ import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.stream.Stream;
 import javax.tools.ToolProvider;
@@ -166,6 +167,36 @@ class CompilerTest {
         assertEquals(List.of(40, 16, -8), call.refSlots());
         Compiler.Safepoint prologue = sites.get(0);
         assertEquals(List.of(40, 16), prologue.refSlots(), "before any local is assigned only arguments are live");
+    }
+
+    @Test
+    void tableswitchJumpsThroughATable() throws IOException {
+        Path classes = compile("""
+                package duke.test;
+                public final class Entry {
+                    static int pick(int k) {
+                        switch (k) {
+                            case 0: return 10;
+                            case 1: return 11;
+                            case 2: return 12;
+                            case 4: return 14;
+                            case 5: return 15;
+                            default: return 0;
+                        }
+                    }
+                    public static void main() {
+                        pick(3);
+                    }
+                }
+                """);
+        Image image = new Compiler(ClassPool.load(classes)).compile("duke/test/Entry", "main");
+        Image.Symbol pick = image.symbols().stream()
+                .filter(s -> s.name().equals("duke/test/Entry.pick(I)I")).findFirst().orElseThrow();
+        String code = HexFormat.of().formatHex(pick.section().toByteArray(), pick.offset(), pick.offset() + pick.size());
+        // movsxd rax, [rcx + 4*rax]; add rax, rcx; jmp rax
+        assertTrue(code.contains("48630481" + "4801c8" + "ffe0"), code);
+        // A compare chain would test case 4 with cmp eax, 4; the table only compares against the range.
+        assertTrue(!code.contains("83f804"), "no compare chain: " + code);
     }
 
     @Test

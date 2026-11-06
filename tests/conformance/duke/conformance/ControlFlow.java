@@ -69,6 +69,78 @@ final class ControlFlow {
         return total;
     }
 
+    /** Keys on both sides of a range that starts below zero and has holes. */
+    static String negativeRangeSwitch() {
+        StringBuilder out = new StringBuilder();
+        int[] keys = {Integer.MIN_VALUE, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, Integer.MAX_VALUE};
+        for (int key : keys) {
+            switch (key) {
+                case -6 -> out.append('a');
+                case -5 -> out.append('b');
+                case -3 -> out.append('c');
+                case -2 -> out.append('d');
+                case 0 -> out.append('e');
+                case 2 -> out.append('f');
+                default -> out.append('.');
+            }
+        }
+        return out.toString();
+    }
+
+    /** A range starting at Integer.MIN_VALUE, so subtracting the low value wraps for most keys. */
+    static String switchAtIntegerMinimum() {
+        StringBuilder out = new StringBuilder();
+        int[] keys = {Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MIN_VALUE + 3, Integer.MIN_VALUE + 4, -1, 0,
+                Integer.MAX_VALUE};
+        for (int key : keys) {
+            switch (key) {
+                case Integer.MIN_VALUE -> out.append('w');
+                case Integer.MIN_VALUE + 1 -> out.append('x');
+                case Integer.MIN_VALUE + 2 -> out.append('y');
+                case Integer.MIN_VALUE + 3 -> out.append('z');
+                default -> out.append('.');
+            }
+        }
+        return out.toString();
+    }
+
+    /** Narrowed from a long with high bits set, so the key's register had more than 32 bits in it. */
+    static int switchOnNarrowedLong() {
+        int total = 0;
+        for (long wide = 0x7_0000_0000L; wide < 0x7_0000_0006L; wide++) {
+            switch ((int) wide) {
+                case 1 -> total += 1;
+                case 2 -> total += 20;
+                case 3 -> total += 300;
+                case 4 -> total += 4000;
+                default -> total += 50000;
+            }
+        }
+        return total;
+    }
+
+    static String switchOnStringsAndChars() {
+        StringBuilder out = new StringBuilder();
+        for (String s : new String[] {"alpha", "beta", "gamma", "delta", "omega"}) {
+            out.append(switch (s) {
+                case "alpha" -> 1;
+                case "beta" -> 2;
+                case "gamma" -> 3;
+                case "delta" -> 4;
+                default -> 0;
+            });
+        }
+        for (char c = 'a'; c <= 'h'; c++) {
+            switch (c) {
+                case 'b', 'c' -> out.append('x');
+                case 'd' -> out.append('y');
+                case 'e', 'f', 'g' -> out.append('z');
+                default -> out.append('-');
+            }
+        }
+        return out.toString();
+    }
+
     static int sparseSwitch() {
         int total = 0;
         for (int i = 0; i < 4; i++) {

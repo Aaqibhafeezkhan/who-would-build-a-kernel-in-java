@@ -55,6 +55,7 @@ import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.AccessFlag;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -246,7 +247,7 @@ final class MethodCompiler {
                 }
                 branch(b.opcode(), target);
             }
-            case TableSwitchInstruction t -> lookup(t.cases(), t.defaultTarget());
+            case TableSwitchInstruction t -> tableSwitch(t);
             case LookupSwitchInstruction l -> lookup(l.cases(), l.defaultTarget());
             case StackInstruction s -> stack(s.opcode());
             case FieldInstruction f -> field(f);
@@ -670,7 +671,32 @@ final class MethodCompiler {
         };
     }
 
-    /** Compare chain for both switch forms; a jump table can come with a real register allocator. */
+    /**
+     * Subtracting the low value lets one unsigned compare reject keys on either side of the range.
+     * The table holds 32-bit offsets from its own start, so it needs no relocations.
+     */
+    private void tableSwitch(TableSwitchInstruction t) {
+        Map<Integer, Label> targets = new HashMap<>();
+        for (SwitchCase c : t.cases()) {
+            targets.put(c.caseValue(), c.target());
+        }
+        X64.Label table = new X64.Label();
+        a.pop(RAX);
+        // Always emitted: the 32-bit sub also clears rax's upper half for the index below.
+        a.aluImm(Alu.SUB, false, RAX, t.lowValue());
+        a.aluImm(Alu.CMP, false, RAX, t.highValue() - t.lowValue());
+        a.jcc(Cond.A, label(t.defaultTarget()));
+        a.lea(RCX, table);
+        a.load(4, true, RAX, Mem.at(RCX, RAX, 4, 0));
+        a.alu(Alu.ADD, true, RAX, RCX);
+        a.jmp(RAX);
+        a.bind(table);
+        for (int i = 0; i <= t.highValue() - t.lowValue(); i++) {
+            a.tableEntry(table, label(targets.getOrDefault(t.lowValue() + i, t.defaultTarget())));
+        }
+    }
+
+    /** Compare chain for lookupswitch, whose keys are sparse. */
     private void lookup(List<SwitchCase> cases, Label defaultTarget) {
         a.pop(RAX);
         for (SwitchCase c : cases) {

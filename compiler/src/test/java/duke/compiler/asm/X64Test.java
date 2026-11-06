@@ -183,6 +183,7 @@ class X64Test {
                 c("push rdi", "57", a -> a.push(RDI)),
                 c("pop r8", "41 58", a -> a.pop(R8)),
                 c("jmp rax", "ff e0", a -> a.jmp(RAX)),
+                c("movsxd rax, dword ptr [rcx + 4*rax]", "48 63 04 81", a -> a.load(4, true, RAX, Mem.at(RCX, RAX, 4, 0))),
                 c("jmp r9", "41 ff e1", a -> a.jmp(R9)),
                 c("mov rbp, r8", "4c 89 c5", a -> a.mov(RBP, R8)),
                 c("mov rsp, r9", "4c 89 cc", a -> a.mov(RSP, R9)),
@@ -229,6 +230,23 @@ class X64Test {
         a.bind(target);       // 8
         // clang: lea rax, [rip + 1] -> 48 8d 05 01 00 00 00
         assertEquals("488d0501000000" + "c3", HexFormat.of().formatHex(s.toByteArray()));
+    }
+
+    @Test
+    void tableEntriesAreOffsetsFromTheTable() {
+        Section s = new Section(".text", Section.Kind.TEXT);
+        X64 a = new X64(s);
+        X64.Label back = new X64.Label();
+        X64.Label table = new X64.Label();
+        X64.Label forward = new X64.Label();
+        a.bind(back);         // 0
+        a.ret();
+        a.bind(table);        // 1
+        a.tableEntry(table, back);
+        a.tableEntry(table, forward);
+        a.bind(forward);      // 9
+        a.ret();
+        assertEquals("c3" + "ffffffff" + "08000000" + "c3", HexFormat.of().formatHex(s.toByteArray()));
     }
 
     @Test

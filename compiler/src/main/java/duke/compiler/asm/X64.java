@@ -13,7 +13,8 @@ public final class X64 {
 
     public static final class Label {
         private int position = -1;
-        private final List<Integer> pending = new ArrayList<>();
+        /** Sites waiting for this label: each 32-bit slot gets the label's offset from its origin. */
+        private final List<int[]> pending = new ArrayList<>();
 
         public boolean isBound() {
             return position >= 0;
@@ -75,20 +76,28 @@ public final class X64 {
             throw new IllegalStateException("label bound twice");
         }
         label.position = out.size();
-        for (int site : label.pending) {
-            out.put32(site, label.position - (site + 4));
+        for (int[] p : label.pending) {
+            out.put32(p[0], label.position - p[1]);
         }
         label.pending.clear();
     }
 
     private void rel32(Label label) {
-        int site = out.size();
+        offset32(label, out.size() + 4);
+    }
+
+    private void offset32(Label label, int origin) {
         if (label.isBound()) {
-            out.emit32(label.position - (site + 4));
+            out.emit32(label.position - origin);
         } else {
-            label.pending.add(site);
+            label.pending.add(new int[] {out.size(), origin});
             out.emit32(0);
         }
+    }
+
+    /** A jump table entry: {@code target}'s 32-bit offset from {@code table}, which must be bound. */
+    public void tableEntry(Label table, Label target) {
+        offset32(target, table.position());
     }
 
     public void jmp(Label target) {
