@@ -4,6 +4,7 @@ import duke.compiler.asm.Cond;
 import duke.compiler.asm.Mem;
 import duke.compiler.asm.Reg;
 import duke.compiler.asm.X64;
+import duke.compiler.image.Dwarf;
 import duke.compiler.image.Image;
 import duke.compiler.image.Reloc;
 import duke.compiler.image.Section;
@@ -584,6 +585,19 @@ public final class Compiler {
 
     void recordLines(String methodSymbol, String sourceFile, List<int[]> lines) {
         lineInfo.put(methodSymbol, new LineInfo(sourceFile, lines));
+    }
+
+    /** Each method with a source file, as a path relative to its source root, for the DWARF line table. */
+    public List<Dwarf.Function> debugLines() {
+        List<Dwarf.Function> functions = new ArrayList<>();
+        lineInfo.forEach((symbol, info) -> {
+            if (info.sourceFile() != null) {
+                String owner = symbol.substring(0, symbol.indexOf('.'));
+                String dir = owner.substring(0, owner.lastIndexOf('/') + 1);
+                functions.add(new Dwarf.Function(symbol, dir + info.sourceFile(), info.lines()));
+            }
+        });
+        return functions;
     }
 
     /**

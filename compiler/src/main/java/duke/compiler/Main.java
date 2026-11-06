@@ -1,5 +1,6 @@
 package duke.compiler;
 
+import duke.compiler.image.Dwarf;
 import duke.compiler.image.ElfWriter;
 import duke.compiler.image.Image;
 import java.io.IOException;
@@ -53,6 +54,7 @@ public final class Main {
         }
 
         Image.Linked linked;
+        List<Dwarf.Function> debugLines;
         try {
             Compiler compiler = new Compiler(ClassPool.load(classes));
             if (user) {
@@ -61,12 +63,14 @@ public final class Main {
             includes.forEach(compiler::include);
             Image image = compiler.compile(entry.substring(0, dot), entry.substring(dot + 1));
             linked = image.link(user ? Compiler.USER_BASE : Compiler.KERNEL_BASE);
+            debugLines = compiler.debugLines();
         } catch (CompileException e) {
             System.err.println("dukec: error: " + e.getMessage());
             System.exit(1);
             return;
         }
-        Files.write(output, ElfWriter.write(linked, linked.address(Compiler.ENTRY_SYMBOL)));
+        Files.write(output, ElfWriter.write(linked, linked.address(Compiler.ENTRY_SYMBOL), false,
+                Dwarf.sections(linked, debugLines)));
         if (user && !output.toFile().setExecutable(true)) {
             System.err.println("dukec: warning: could not mark " + output + " executable");
         }

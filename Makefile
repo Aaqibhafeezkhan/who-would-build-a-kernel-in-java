@@ -23,7 +23,7 @@ JS_SRCS       := $(wildcard kernel/js/*.js)
 KERNEL_JAVAC  := javac --system none -XDstringConcat=inline
 COMPILER_SRCS := $(shell find compiler/src/main -name '*.java') compiler/build.gradle.kts
 
-.PHONY: all compiler run test unit-test boot-test conformance conformance-gc panic-tests ktest shell-test js-test user-test disasm clean
+.PHONY: all compiler run debug test unit-test boot-test conformance conformance-gc panic-tests ktest shell-test js-test user-test disasm clean
 
 all: $(BUILD)/esp/boot/kernel.elf
 
@@ -58,6 +58,10 @@ $(BUILD)/esp/boot/kernel.elf: $(BUILD)/kernel.elf $(BUILD)/limine/BOOTX64.EFI bo
 
 run: all
 	tools/qemu.sh $(BUILD)/esp -serial mon:stdio
+
+# Waits at reset for a debugger on :1234 (tools/debug.gdb or tools/debug.lldb).
+debug: all
+	tools/qemu.sh $(BUILD)/esp -serial mon:stdio -s -S
 
 test: unit-test js-test boot-test conformance panic-tests ktest shell-test user-test
 

@@ -28,15 +28,20 @@ public final class ElfWriter {
     private record Segment(int flags, long fileOffset, long vaddr, long fileSize, long memSize) {}
 
     public static byte[] write(Image.Linked linked, long entry) {
-        return write(linked, entry, false);
+        return write(linked, entry, false, Map.of());
+    }
+
+    public static byte[] write(Image.Linked linked, long entry, boolean mapHeaders) {
+        return write(linked, entry, mapHeaders, Map.of());
     }
 
     /**
      * With {@code mapHeaders}, the first page of the file (the ELF and program headers) is loaded as
      * a read-only segment on the page below the text. The Linux kernel doesn't need that, but some
      * loaders (Rosetta's, for one) insist that the first PT_LOAD start at file offset 0.
+     * {@code debug} sections (name to contents) go in unloaded, after the symbol table.
      */
-    public static byte[] write(Image.Linked linked, long entry, boolean mapHeaders) {
+    public static byte[] write(Image.Linked linked, long entry, boolean mapHeaders, Map<String, byte[]> debug) {
         Map<Section.Kind, Image.Placed> byKind = new HashMap<>();
         for (Image.Placed p : linked.sections()) {
             byKind.put(p.section().kind(), p);
@@ -80,19 +85,32 @@ public final class ElfWriter {
         long symtabOff = Image.alignUp(contentEnd, 8);
         long strtabOff = symtabOff + symtab.capacity();
         byte[] strBytes = str.bytes();
-        long shstrOff = strtabOff + strBytes.length;
+        long debugOff = strtabOff + strBytes.length;
+        long[] debugOffsets = new long[debug.size()];
+        long next = debugOff;
+        int d = 0;
+        for (byte[] contents : debug.values()) {
+            debugOffsets[d++] = next;
+            next += contents.length;
+        }
+        long shstrOff = next;
 
-        int[] names = new int[8];
+        int shNum = 8 + debug.size();
+        int shstrIndex = shNum - 1;
+        int[] names = new int[shNum];
         names[1] = shstr.add(".text");
         names[2] = shstr.add(".rodata");
         names[3] = shstr.add(".data");
         names[4] = shstr.add(".bss");
         names[5] = shstr.add(".symtab");
         names[6] = shstr.add(".strtab");
-        names[7] = shstr.add(".shstrtab");
+        d = 7;
+        for (String name : debug.keySet()) {
+            names[d++] = shstr.add(name);
+        }
+        names[shstrIndex] = shstr.add(".shstrtab");
         byte[] shstrBytes = shstr.bytes();
         long shOff = Image.alignUp(shstrOff + shstrBytes.length, 8);
-        int shNum = 8;
 
         ByteBuffer out = le((int) (shOff + (long) shNum * SHDR_SIZE));
 
@@ -110,7 +128,7 @@ public final class ElfWriter {
         out.putShort((short) segments.size());
         out.putShort((short) SHDR_SIZE);
         out.putShort((short) shNum);
-        out.putShort((short) 7);
+        out.putShort((short) shstrIndex);
 
         for (Segment seg : segments) {
             out.putInt(PT_LOAD);
@@ -128,6 +146,10 @@ public final class ElfWriter {
         }
         out.put((int) symtabOff, symtab.array());
         out.put((int) strtabOff, strBytes);
+        d = 0;
+        for (byte[] contents : debug.values()) {
+            out.put((int) debugOffsets[d++], contents);
+        }
         out.put((int) shstrOff, shstrBytes);
 
         out.position((int) shOff);
@@ -138,7 +160,11 @@ public final class ElfWriter {
         sectionHeader(out, names[4], SHT_NOBITS, SHF_ALLOC | SHF_WRITE, bss, bss.section().size());
         rawHeader(out, names[5], SHT_SYMTAB, 0, 0, symtabOff, symtab.capacity(), 6, 1, 8, SYM_SIZE);
         rawHeader(out, names[6], SHT_STRTAB, 0, 0, strtabOff, strBytes.length, 0, 0, 1, 0);
-        rawHeader(out, names[7], SHT_STRTAB, 0, 0, shstrOff, shstrBytes.length, 0, 0, 1, 0);
+        d = 0;
+        for (byte[] contents : debug.values()) {
+            rawHeader(out, names[7 + d], SHT_PROGBITS, 0, 0, debugOffsets[d++], contents.length, 0, 0, 1, 0);
+        }
+        rawHeader(out, names[shstrIndex], SHT_STRTAB, 0, 0, shstrOff, shstrBytes.length, 0, 0, 1, 0);
         return out.array();
     }
 

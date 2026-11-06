@@ -1,0 +1,4 @@
+# Attach to `make debug`: lldb -s tools/debug.lldb, from the repo root.
+target create build/kernel.elf
+settings set target.source-map duke kernel/src/duke java kernel/src/java
+gdb-remote 1234

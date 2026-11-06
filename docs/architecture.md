@@ -386,6 +386,9 @@ ClassPool ─▶ Compiler (worklist from Kernel.main) ─▶ MethodCompiler per 
 - **X64** encodes instructions. Each form is pinned to clang's output in `X64Test`.
 - **Image / ElfWriter** do layout and relocation (`PC32`, `ABS64`) and emit a static ELF with a
   symbol table, so `objdump` and `gdb` show Java method names.
+- **Dwarf** adds `.debug_info` and `.debug_line` from each method's LineNumberTable, so a debugger
+  attached to `make debug` can break on a method and step Java lines. A method's prologue maps to
+  line 0, because with the first line lldb put method breakpoints on the second.
 
 ### Execution model
 

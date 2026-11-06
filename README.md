@@ -72,6 +72,7 @@ covers both. Put the firmware somewhere unusual? Set `OVMF=/path/to/OVMF_CODE.fd
 make run          # build and boot to a shell on your terminal (try help); Ctrl-A X quits
 make test         # unit tests, jsc vs node, boot, conformance, panic, kernel and shell suites
 make disasm       # objdump the kernel (symbols included)
+make debug        # boot halted for a debugger: lldb -s tools/debug.lldb, or gdb -x tools/debug.gdb
 ```
 
 The first build downloads a pinned Limine release into `build/limine`.
