@@ -8,6 +8,7 @@ import duke.kernel.fs.Fat;
 import duke.kernel.mm.KernelAddressSpace;
 import duke.kernel.mm.KernelHeap;
 import duke.kernel.mm.PhysicalMemory;
+import duke.kernel.mm.Tlb;
 import duke.kernel.pci.Pci;
 import duke.kernel.time.Timer;
 import duke.kernel.user.UserMode;
@@ -48,6 +49,7 @@ public final class Kernel {
         Pci.init();
         Pic.disable();
         LocalApic.init();
+        Tlb.init();
         Timer.init();
         Scheduler.init();
         // Disk requests time out against the HPET clock, and the disk lock is a monitor.

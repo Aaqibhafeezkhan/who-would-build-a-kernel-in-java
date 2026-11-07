@@ -345,6 +345,12 @@ public final class X64 {
         out.emit8(0x90);
     }
 
+    public void mfence() {
+        out.emit8(0x0F);
+        out.emit8(0xAE);
+        out.emit8(0xF0);
+    }
+
     /** {@code mov sreg, src} with clang's 0x66 prefix; sreg is 0 es, 2 ss, 3 ds, 4 fs, 5 gs. */
     public void movToSegment(int sreg, Reg src) {
         out.emit8(0x66);

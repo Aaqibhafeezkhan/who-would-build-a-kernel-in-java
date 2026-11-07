@@ -1401,6 +1401,7 @@ final class MethodCompiler {
             case "disableInterrupts" -> a.cli();
             case "enableInterrupts" -> a.sti();
             case "pause" -> a.pause();
+            case "memoryFence" -> a.mfence();
             default -> throw error("unknown intrinsic " + MAGIC + "." + name);
         }
     }

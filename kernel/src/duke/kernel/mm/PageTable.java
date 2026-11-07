@@ -150,6 +150,49 @@ public final class PageTable {
         }
     }
 
+    /**
+     * Clears the 4 KiB mapping at {@code virtual} and returns its frame, or -1 if there wasn't one.
+     * Only from this CPU's TLB: the frame isn't safe to reuse until the others' are flushed too.
+     */
+    public long remove(long virtual) {
+        long entry = entry(virtual, 1, false, 0);
+        long value = entry == 0 ? 0 : Magic.peekLong(entry);
+        if ((value & PRESENT) == 0) {
+            return -1;
+        }
+        Magic.pokeLong(entry, 0);
+        Magic.invalidatePage(virtual);
+        return value & ADDRESS_MASK;
+    }
+
+    /**
+     * The lowest page-aligned address in [from, end) with a 4 KiB page mapped, or end. Skips a
+     * missing table whole, so a gigabyte that was reserved and never touched is a few reads.
+     */
+    public long nextMapped(long from, long end) {
+        long virtual = from & -PhysicalMemory.PAGE_SIZE;
+        while (virtual < end) {
+            long table = root;
+            int level = 4;
+            for (; level > 1; level--) {
+                long value = Magic.peekLong(PhysicalMemory.toVirtual(table) + 8 * index(virtual, level));
+                if ((value & PRESENT) == 0) {
+                    break;
+                }
+                if ((value & HUGE) != 0) {
+                    throw new IllegalStateException("0x" + Long.toHexString(virtual) + " is inside a huge page");
+                }
+                table = value & ADDRESS_MASK;
+            }
+            if (level == 1 && (Magic.peekLong(PhysicalMemory.toVirtual(table) + 8 * index(virtual, 1)) & PRESENT) != 0) {
+                return virtual;
+            }
+            long span = 1L << (12 + 9 * (level - 1));
+            virtual = (virtual & -span) + span;
+        }
+        return end;
+    }
+
     /** The physical address {@code virtual} maps to, or -1 if it isn't mapped. */
     public long translate(long virtual) {
         long table = root;

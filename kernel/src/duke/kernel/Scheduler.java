@@ -4,6 +4,7 @@ import duke.kernel.mm.AddressSpace;
 import duke.kernel.mm.KernelAddressSpace;
 import duke.kernel.mm.KernelStacks;
 import duke.kernel.mm.PageTable;
+import duke.kernel.mm.Tlb;
 import duke.kernel.time.Timer;
 import duke.kernel.x86.UserState;
 import duke.rt.Magic;
@@ -448,7 +449,7 @@ public final class Scheduler {
             next.userState.load();
         }
         if (next.addressSpace != previous.addressSpace) {
-            Magic.writeCr3(tableOf(next).root());
+            Tlb.load(tableOf(next));
         }
         swap(Magic.addressOf(previous.rsp) + Tib.ARRAY_DATA, next.rsp[0]);
         Task self = current();
@@ -464,7 +465,7 @@ public final class Scheduler {
     public static void setAddressSpace(AddressSpace space) {
         Task self = current();
         self.addressSpace = space;
-        Magic.writeCr3(tableOf(self).root());
+        Tlb.load(tableOf(self));
     }
 
     /**

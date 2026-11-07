@@ -103,6 +103,7 @@ class X64Test {
                 c("cli", "fa", X64::cli),
                 c("sti", "fb", X64::sti),
                 c("pause", "f3 90", X64::pause),
+                c("mfence", "0f ae f0", X64::mfence),
                 c("xchg dword ptr [rsi], eax", "87 06", a -> a.xchg(false, Mem.at(RSI), RAX)),
                 c("xchg dword ptr [r8], eax", "41 87 00", a -> a.xchg(false, Mem.at(R8), RAX)),
                 c("xchg qword ptr [rsi], rax", "48 87 06", a -> a.xchg(true, Mem.at(RSI), RAX)),

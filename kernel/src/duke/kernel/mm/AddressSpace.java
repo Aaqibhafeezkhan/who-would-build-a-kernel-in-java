@@ -12,8 +12,8 @@ import java.util.Arrays;
  * it uses, as Linux lets it.
  *
  * <p>A process's threads share it, on any CPU at once. Page faults map pages under a spin lock, since
- * they come with interrupts off, and see reservations without one: {@link #reserve} only ever appends,
- * and publishes each before counting it.
+ * they come with interrupts off, and search the reservations under it too: {@link #unmap} can take
+ * one away while a fault is looking. Everything else that changes them holds the monitor as well.
  */
 public final class AddressSpace {
 
@@ -23,9 +23,12 @@ public final class AddressSpace {
     private static final long PAGE = PhysicalMemory.PAGE_SIZE;
 
     private final PageTable table = PageTable.sharingHigherHalf(KernelAddressSpace.table());
+    /** Pages unmap clears before flushing TLBs and freeing them, so it never holds the spin lock long. */
+    private static final int UNMAP_BATCH = 512;
+
     // Reserved ranges as (start, end, flags), so pageIn can search them without allocating.
     private long[] ranges = new long[3 * 4];
-    private volatile int reserved;
+    private int reserved;
     private final int[] pageInLock = new int[1];
     // Where mmap looks for room: the gap between the executable and the stack, filled from the top.
     private long mapFloor = END;
@@ -58,12 +61,13 @@ public final class AddressSpace {
             }
         }
         long[] r = 3 * reserved == ranges.length ? Arrays.copyOf(ranges, 2 * ranges.length) : ranges;
+        long interrupts = SpinLock.lockInterruptsOff(pageInLock);
         r[3 * reserved] = start;
         r[3 * reserved + 1] = start + length;
         r[3 * reserved + 2] = flags;
-        // The entry and the array before the count: a fault on another CPU that sees the count sees them.
         ranges = r;
-        reserved = reserved + 1;
+        reserved++;
+        SpinLock.unlockInterruptsOff(pageInLock, interrupts);
     }
 
     /**
@@ -73,12 +77,10 @@ public final class AddressSpace {
      */
     public boolean pageIn(long address) {
         long page = address & -PAGE;
-        int n = reserved;
-        long[] r = ranges;
-        for (int i = 0; i < n; i++) {
-            if (page >= r[3 * i] && page < r[3 * i + 1]) {
-                long flags = SpinLock.lockInterruptsOff(pageInLock);
-                try {
+        long interrupts = SpinLock.lockInterruptsOff(pageInLock);
+        try {
+            for (int i = 0; i < reserved; i++) {
+                if (page >= ranges[3 * i] && page < ranges[3 * i + 1]) {
                     // Another thread's fault may have mapped it since this one was raised.
                     if (table.flags(page) != 0) {
                         return true;
@@ -87,14 +89,67 @@ public final class AddressSpace {
                     if (frame < 0) {
                         return false;
                     }
-                    table.map(page, frame, r[3 * i + 2] | PageTable.USER);
+                    table.map(page, frame, ranges[3 * i + 2] | PageTable.USER);
                     return true;
-                } finally {
-                    SpinLock.unlockInterruptsOff(pageInLock, flags);
                 }
             }
+            return false;
+        } finally {
+            SpinLock.unlockInterruptsOff(pageInLock, interrupts);
         }
-        return false;
+    }
+
+    /**
+     * munmap: takes [start, start + length) out of the reservations and frees every page mapped
+     * there, reserved or not, once no CPU can still reach it. Any of it may be unmapped already.
+     * Both must be page-aligned. Interrupts must be on, for {@link Tlb#flush}.
+     */
+    public synchronized void unmap(long start, long length) {
+        checkUser(start, length);
+        if ((start | length) % PAGE != 0) {
+            throw new IllegalArgumentException("unaligned unmapping");
+        }
+        long end = start + length;
+        // What's left of each reservation: below start, above end, or both, which splits it.
+        // Reservations don't overlap, so only one can split.
+        long[] r = new long[ranges.length + 3];
+        int n = 0;
+        for (int i = 0; i < reserved; i++) {
+            long from = ranges[3 * i];
+            long to = ranges[3 * i + 1];
+            if (from < start) {
+                r[3 * n] = from;
+                r[3 * n + 1] = Math.min(to, start);
+                r[3 * n + 2] = ranges[3 * i + 2];
+                n++;
+            }
+            if (to > end) {
+                r[3 * n] = Math.max(from, end);
+                r[3 * n + 1] = to;
+                r[3 * n + 2] = ranges[3 * i + 2];
+                n++;
+            }
+        }
+        long interrupts = SpinLock.lockInterruptsOff(pageInLock);
+        ranges = r;
+        reserved = n;
+        SpinLock.unlockInterruptsOff(pageInLock, interrupts);
+
+        // No fault can map into the range now, and the monitor keeps mmap from handing it out again.
+        long[] frames = new long[UNMAP_BATCH];
+        long at = start;
+        while (at < end) {
+            int count = 0;
+            interrupts = SpinLock.lockInterruptsOff(pageInLock);
+            for (at = table.nextMapped(at, end); at < end && count < frames.length; at = table.nextMapped(at + PAGE, end)) {
+                frames[count++] = table.remove(at);
+            }
+            SpinLock.unlockInterruptsOff(pageInLock, interrupts);
+            Tlb.flush(table);
+            for (int i = 0; i < count; i++) {
+                PhysicalMemory.free(frames[i]);
+            }
+        }
     }
 
     /** Lets {@link #map} hand out [floor, top), top down. */
@@ -106,13 +161,26 @@ public final class AddressSpace {
     /** Reserves {@code length} bytes (rounded up to pages) somewhere free, or returns -1 if there's no room. */
     public synchronized long map(long length, long flags) {
         long bytes = (length + PAGE - 1) & -PAGE;
-        if (length <= 0 || bytes <= 0 || bytes > mapTop - mapFloor) {
+        if (length <= 0 || bytes <= 0) {
             return -1;
         }
-        long start = mapTop - bytes;
-        reserve(start, bytes, flags);
-        mapTop = start;
-        return start;
+        // The highest gap that fits, so what munmap freed gets used again.
+        long top = mapTop;
+        while (top - mapFloor >= bytes) {
+            long start = top - bytes;
+            long blocked = top;
+            for (int i = 0; i < reserved; i++) {
+                if (ranges[3 * i] < top && start < ranges[3 * i + 1]) {
+                    blocked = Math.min(blocked, ranges[3 * i]);
+                }
+            }
+            if (blocked == top) {
+                reserve(start, bytes, flags);
+                return start;
+            }
+            top = blocked;
+        }
+        return -1;
     }
 
     /**

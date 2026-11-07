@@ -259,4 +259,7 @@ public final class Magic {
     public static native void enableInterrupts();
 
     public static native void pause();
+
+    /** A full fence: on x86 a load can otherwise pass an earlier store to another address. */
+    public static native void memoryFence();
 }

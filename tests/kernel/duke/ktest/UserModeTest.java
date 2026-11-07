@@ -596,6 +596,56 @@ final class UserModeTest {
         assertEquals(7, f.errorCode, "present, write, user: paged in by the read-only fault, then refused");
     }
 
+    static void testMunmapTakesPagesAway() {
+        long first = MAP_TOP - 2 * PAGE;
+        Program p = new Program();
+        // Two pages at rbx, both touched; the first unmapped; edi from the second kept in data;
+        // then a write to the first.
+        p.load(new Code().mmap(2 * PAGE, READ_WRITE, ANONYMOUS, -1).b(0x48, 0x89, 0xC3)
+                .b(0xC6, 0x03, 1)                                  // mov byte [rbx], 1
+                .b(0xC6, 0x83).imm32(PAGE).b(2)                    // mov byte [rbx + 4096], 2
+                .call(SystemCalls.MUNMAP, first, PAGE, 0, p.data)
+                .b(0x0F, 0xB6, 0xBB).imm32(PAGE)                   // movzx edi, byte [rbx + 4096]
+                .b(0x89, 0x3C, 0x25).imm32(p.data + 8)             // mov [data + 8], edi
+                .b(0xC6, 0x03, 3));                                // mov byte [rbx], 3
+        try {
+            long status = p.run();
+            throw new AssertionError("exited with " + status + " instead of faulting");
+        } catch (UserMode.Fault f) {
+            assertEquals(PF, f.vector, "page fault");
+            assertEquals(first, f.address, "on the unmapped page");
+            assertEquals(0, Magic.peekLong(p.kernelView(0)), "munmap's result");
+            assertEquals(2, Magic.peekInt(p.kernelView(8)), "the page after it kept");
+        } finally {
+            p.free();
+        }
+    }
+
+    static void testMmapReusesWhatMunmapFreed() {
+        // mov rbx, rax; munmap it; mmap again; sub rax, rbx; exit(eax).
+        Code code = new Code().mmap(PAGE, READ_WRITE, ANONYMOUS, -1).b(0x48, 0x89, 0xC3)
+                .call(SystemCalls.MUNMAP, MAP_TOP - PAGE, PAGE, 0, BASE + 2 * PAGE)
+                .mmap(PAGE, READ_WRITE, ANONYMOUS, -1).b(0x48, 0x29, 0xD8).exitWithResult();
+        assertEquals(0, run(code), "same address");
+    }
+
+    static void testMunmapChecksItsArguments() {
+        Program p = new Program();
+        try {
+            p.load(new Code().call(SystemCalls.MUNMAP, MAP_TOP - PAGE + 1, PAGE, 0, p.data)
+                    .call(SystemCalls.MUNMAP, MAP_TOP - PAGE, 0, 0, p.data + 8)
+                    .call(SystemCalls.MUNMAP, AddressSpace.END - PAGE, 2 * PAGE, 0, p.data + 16)
+                    .call(SystemCalls.MUNMAP, MAP_FLOOR, 1, 0, p.data + 24)
+                    .exit(0)).run();
+            assertEquals(-SystemCalls.EINVAL, Magic.peekLong(p.kernelView(0)), "unaligned");
+            assertEquals(-SystemCalls.EINVAL, Magic.peekLong(p.kernelView(8)), "empty");
+            assertEquals(-SystemCalls.EINVAL, Magic.peekLong(p.kernelView(16)), "past the lower half");
+            assertEquals(0, Magic.peekLong(p.kernelView(24)), "nothing there, rounded up to a page");
+        } finally {
+            p.free();
+        }
+    }
+
     static void testArchPrctl() {
         Program p = new Program();
         Magic.pokeLong(p.kernelView(64 + 8), 77);

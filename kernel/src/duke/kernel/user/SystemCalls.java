@@ -25,6 +25,7 @@ public final class SystemCalls {
     public static final int FSTAT = 5;
     public static final int LSEEK = 8;
     public static final int MMAP = 9;
+    public static final int MUNMAP = 11;
     public static final int DUP = 32;
     public static final int DUP2 = 33;
     public static final int GETPID = 39;
@@ -151,6 +152,8 @@ public final class SystemCalls {
         } else if (number == MMAP) {
             result = mmap(Frame.register(frame, Frame.RSI), Frame.register(frame, Frame.RDX),
                     Frame.register(frame, Frame.R10), Frame.register(frame, Frame.R8), Frame.register(frame, Frame.R9));
+        } else if (number == MUNMAP) {
+            result = munmap(a0, a1);
         } else if (number == GETPID || number == GETPPID) {
             Process self = Process.current();
             result = self == null ? -ESRCH : number == GETPID ? self.pid : self.parentPid();
@@ -589,6 +592,17 @@ public final class SystemCalls {
         }
         long address = Scheduler.addressSpace().map(length, pageFlags);
         return address < 0 ? -ENOMEM : address;
+    }
+
+    /** As Linux: the length rounds up to pages, and none of it has to be mapped. */
+    private static long munmap(long address, long length) {
+        long bytes = (length + PhysicalMemory.PAGE_SIZE - 1) & -PhysicalMemory.PAGE_SIZE;
+        if ((address & (PhysicalMemory.PAGE_SIZE - 1)) != 0 || length <= 0 || bytes <= 0 || address < 0
+                || bytes > AddressSpace.END - address) {
+            return -EINVAL;
+        }
+        Scheduler.addressSpace().unmap(address, bytes);
+        return 0;
     }
 
     static boolean userReadable(long address, long length) {

@@ -246,16 +246,19 @@ Each process has an `AddressSpace`: its own lower half, the kernel's higher half
 hands it to the scheduler, which keeps it with the thread and loads CR3 whenever it
 switches between threads on different tables, so kernel code reading user memory in a system
 call sees the right process even after moving CPUs. The CR3 write flushes the old process's TLB
-entries, which is all the shootdown single-threaded processes need. `run` goes back to the
-kernel's table before returning, so the space can be freed, with every frame mapped into it.
+entries, so only a CPU still on the same table can hold a stale one. `Tlb` records which table
+each CPU loaded, and `munmap` asks every CPU on that table to reload CR3 by IPI, waiting for all
+of them before it frees a frame. `run` goes back to the kernel's table before returning, so the
+space can be freed, with every frame mapped into it.
 
 Memory can also be reserved rather than mapped: the stack and anonymous `mmap`s get page-table
 entries only when a ring 3 page fault lands in them (`AddressSpace.pageIn`, called from
 `Interrupts.dispatch` before treating the fault as fatal, with interrupts off and no heap
 allocation). That's what lets `jsc`'s programs reserve a 1 GiB heap on a 256 MiB machine.
 `write` pages in untouched reserved pages it's asked to read, as the copy's fault would on Linux.
-`mmap` takes private anonymous mappings only, placed top down in the gap between the executable
-and the stack.
+`mmap` takes private anonymous mappings only, in the highest gap that fits between the executable
+and the stack, so what `munmap` frees gets used again. Faults search the reservations under the
+page-in lock rather than without one, because `munmap` can take a range away.
 
 System calls check a user pointer's pages first (`userReadable`, `userWritable`), then touch them
 only through `Magic.copyUserMemory` and `Magic.loadUserInt`. Each is a stub with one instruction
