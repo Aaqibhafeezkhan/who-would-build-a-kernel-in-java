@@ -11,9 +11,10 @@ import duke.rt.Tib;
  *
  * <p>Each thread has a slot: a mapping holding its stack, then its CPU block (GS points there),
  * then the word the kernel clears once the thread has exited (CLONE_CHILD_CLEARTID). Main has slot
- * 0, on _start's stack and block. There's no munmap yet, so a slot whose word is clear is reused
- * instead: nothing runs on that stack any more. The slot is also the thread's CPU index, which the
- * heap lock records its holder by, and Smp stops it by for a collection.
+ * 0, on _start's stack and block. Once that word is clear nothing runs on the stack any more, so a
+ * new thread can take the slot with its mapping, or it can be unmapped ({@link #releaseSpareStacks}).
+ * The slot is also the thread's CPU index, which the heap lock records its holder by, and Smp stops
+ * it by for a collection.
  *
  * <p>All of this is guarded by {@link #lock}, a futex lock. As in the kernel, nothing allocates
  * under it.
@@ -55,6 +56,7 @@ public final class Scheduler {
     }
 
     private static final int MMAP = 9;
+    private static final int MUNMAP = 11;
     private static final int FUTEX = 202;
     private static final int NANOSLEEP = 35;
     private static final int CLOCK_GETTIME = 228;
@@ -72,6 +74,8 @@ public final class Scheduler {
     /** As main's (Compiler.USER_STACK_SIZE), and HotSpot's default; touched pages only. */
     private static final long STACK_BYTES = 1024 * 1024;
     private static final long BLOCK_BYTES = 4096;
+    /** Finished threads' stacks kept mapped for new threads, as glibc's stack cache does. Not tuned. */
+    private static final int SPARE_STACKS = 8;
     /** Compiler.CPU_SELF, STACK_LIMIT, STACK_LIMIT_SAVED, STACK_BASE, CPU_INDEX and CPU_BLOCK_SIZE. */
     private static final int BLOCK_SELF = 0;
     private static final int BLOCK_STACK_LIMIT = 8;
@@ -181,6 +185,7 @@ public final class Scheduler {
             }
             SLOTS[slot] = base;
         }
+        releaseSpareStacks(slot);
         long block = base + STACK_BYTES;
         Magic.pokeLong(block + BLOCK_SELF, block);
         // Checks off until threadMain sets its limit.
@@ -205,18 +210,43 @@ public final class Scheduler {
         unlock();
     }
 
-    /**
-     * A slot no thread is using, and whose last thread's stack is free: the kernel cleared its tid
-     * word on the way out. -1 if every slot is busy. Under the lock.
-     */
+    /** A free slot, one with a stack still mapped if there is one; -1 if every slot is busy. Under the lock. */
     private static int freeSlot() {
+        int unmapped = -1;
         for (int slot = 1; slot < MAX_THREADS; slot++) {
-            Task task = TASKS[slot];
-            if (task == null || task.state == DEAD && Magic.peekInt(SLOTS[slot] + STACK_BYTES + BLOCK_TID) == 0) {
-                return slot;
+            if (free(slot)) {
+                if (SLOTS[slot] != 0) {
+                    return slot;
+                }
+                if (unmapped < 0) {
+                    unmapped = slot;
+                }
             }
         }
-        return -1;
+        return unmapped;
+    }
+
+    /** No thread is using the slot, and its last one's stack is done with: the kernel cleared its tid word. */
+    private static boolean free(int slot) {
+        Task task = TASKS[slot];
+        return task == null || task.state == DEAD && Magic.peekInt(SLOTS[slot] + STACK_BYTES + BLOCK_TID) == 0;
+    }
+
+    /**
+     * Unmaps free slots' stacks past the first SPARE_STACKS, other than {@code keep}'s. A thread
+     * can't unmap the stack it's on, so this waits for the next start, as glibc's does: a program
+     * whose thread count has dropped gives the rest back then. Under the lock.
+     */
+    private static void releaseSpareStacks(int keep) {
+        int spare = 0;
+        for (int slot = 1; slot < MAX_THREADS; slot++) {
+            if (slot != keep && SLOTS[slot] != 0 && free(slot) && ++spare > SPARE_STACKS) {
+                Magic.syscall(MUNMAP, SLOTS[slot], STACK_BYTES + BLOCK_BYTES, 0, 0, 0, 0);
+                SLOTS[slot] = 0;
+                // Its tid word went with the mapping, so free() mustn't look for it there.
+                TASKS[slot] = null;
+            }
+        }
     }
 
     /**
