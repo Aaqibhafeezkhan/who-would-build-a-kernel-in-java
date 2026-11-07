@@ -126,6 +126,30 @@ public final class UserMode {
         return notPresent && Scheduler.addressSpace().pageIn(Magic.readCr2());
     }
 
+    /**
+     * A page fault in the kernel on Magic.copyUserMemory's or Magic.loadUserInt's user side: pages
+     * it in, or ends the access early so the system call can fail with EFAULT: a page can go away
+     * after it's been checked. False for any other fault, which is the kernel's own.
+     */
+    public static boolean recoverUserAccess(long frame) {
+        long table = Magic.userAccessFixups();
+        long rip = Frame.rip(frame);
+        long resume = 0;
+        for (long i = 0, n = Magic.peekLong(table); i < n; i++) {
+            if (Magic.peekLong(table + 8 + 16 * i) == rip) {
+                resume = Magic.peekLong(table + 16 + 16 * i);
+            }
+        }
+        long address = Magic.readCr2();
+        if (resume == 0 || address < 0 || address >= AddressSpace.END || Scheduler.addressSpace() == null) {
+            return false;
+        }
+        if (!pageIn(frame)) {
+            Frame.setRip(frame, resume);
+        }
+        return true;
+    }
+
     /** An exception in ring 3: back out of user mode for {@link #run} to throw. */
     public static void fault(long frame) {
         int cpu = Magic.cpuIndex();

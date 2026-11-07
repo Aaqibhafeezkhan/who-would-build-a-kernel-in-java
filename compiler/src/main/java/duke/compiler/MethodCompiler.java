@@ -1324,6 +1324,22 @@ final class MethodCompiler {
                 a.lea(RAX, Mem.rip(program.requireSyscallEntry()));
                 pushLong(RAX);
             }
+            case "copyUserMemory" -> {
+                popLong(RCX);
+                popLong(RSI);
+                popLong(Reg.RDI);
+                a.call(program.requireUserAccess(Compiler.USER_COPY));
+                pushLong(RAX);
+            }
+            case "loadUserInt" -> {
+                popLong(Reg.RDI);
+                a.call(program.requireUserAccess(Compiler.USER_LOAD_INT));
+                pushLong(RAX);
+            }
+            case "userAccessFixups" -> {
+                a.lea(RAX, Mem.rip(program.requireUserAccess(Compiler.USER_FIXUPS)));
+                pushLong(RAX);
+            }
             case "apEntry" -> {
                 a.lea(RAX, Mem.rip(program.requireApEntry()));
                 pushLong(RAX);

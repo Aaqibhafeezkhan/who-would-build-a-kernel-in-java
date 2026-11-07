@@ -44,6 +44,25 @@ public final class Magic {
      */
     public static native void copyMemory(long destination, long source, long bytes);
 
+    /**
+     * Copies {@code bytes} forward, where either side may be user memory that's missing: a page
+     * fault there pages it in or ends the copy (duke.kernel.user.UserMode.recoverUserAccess).
+     * Returns how many bytes it didn't copy, 0 if it copied them all.
+     */
+    public static native long copyUserMemory(long destination, long source, long bytes);
+
+    /**
+     * The int at user {@code address}, zero-extended, in one load so a futex word can't tear; -1
+     * if it's missing and can't be paged in.
+     */
+    public static native long loadUserInt(long address);
+
+    /**
+     * Where a fault in copyUserMemory or loadUserInt carries on: a count, then (fault rip, resume
+     * rip) pairs.
+     */
+    public static native long userAccessFixups();
+
     /** Zero exactly {@code words * 8} bytes of aligned ordinary RAM; {@code words} must be nonnegative. */
     public static native void zeroMemoryWords(long destination, long words);
 

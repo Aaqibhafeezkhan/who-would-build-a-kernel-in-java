@@ -52,6 +52,9 @@ public final class Interrupts {
             UserMode.interrupted(frame);
             return;
         }
+        if (vector == PAGE_FAULT && UserMode.recoverUserAccess(frame)) {
+            return;
+        }
         Handler handler = HANDLERS[vector];
         if (handler != null) {
             handler.handle(frame);

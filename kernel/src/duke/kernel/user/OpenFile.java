@@ -54,7 +54,9 @@ final class OpenFile {
         }
         long n = Math.max(0, Math.min(count, contents.length - position));
         if (n > 0) {
-            Magic.copyMemory(buffer, Magic.addressOf(contents) + Tib.ARRAY_DATA + position, n);
+            if (!SystemCalls.putBytes(buffer, contents, position, n)) {
+                return -SystemCalls.EFAULT;
+            }
             position += n;
         }
         return n;
@@ -79,7 +81,9 @@ final class OpenFile {
                 pendingAt = 0;
             }
             long n = Math.min(count, pendingLine.length - pendingAt);
-            Magic.copyMemory(buffer, Magic.addressOf(pendingLine) + Tib.ARRAY_DATA + pendingAt, n);
+            if (!SystemCalls.putBytes(buffer, pendingLine, pendingAt, n)) {
+                return -SystemCalls.EFAULT;
+            }
             pendingAt += (int) n;
             if (pendingAt == pendingLine.length) {
                 pendingLine = null;
@@ -93,8 +97,15 @@ final class OpenFile {
         if (this != CONSOLE) {
             return -SystemCalls.EBADF;
         }
-        for (long i = 0; i < count; i++) {
-            Console.write(Magic.peekByte(buffer + i) & 0xFF);
+        byte[] chunk = new byte[(int) Math.min(count, 4096)];
+        for (long done = 0; done < count; done += chunk.length) {
+            int n = (int) Math.min(chunk.length, count - done);
+            if (Magic.copyUserMemory(Magic.addressOf(chunk) + Tib.ARRAY_DATA, buffer + done, n) != 0) {
+                return done > 0 ? done : -SystemCalls.EFAULT;
+            }
+            for (int i = 0; i < n; i++) {
+                Console.write(chunk[i] & 0xFF);
+            }
         }
         return count;
     }

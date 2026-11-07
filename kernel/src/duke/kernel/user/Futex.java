@@ -45,7 +45,11 @@ final class Futex {
         long deadline = timeoutNanos < 0 ? Long.MAX_VALUE : HpetClock.nanos() + Math.min(timeoutNanos, Long.MAX_VALUE / 2);
         synchronized (LOCK) {
             // Under the lock a waker takes too: a wake after the word changes can't slip in before the wait.
-            if (Magic.peekInt(address) != expected) {
+            long word = Magic.loadUserInt(address);
+            if (word < 0) {
+                return -SystemCalls.EFAULT;
+            }
+            if ((int) word != expected) {
                 return -SystemCalls.EAGAIN;
             }
             Waiter self = new Waiter(space, address);

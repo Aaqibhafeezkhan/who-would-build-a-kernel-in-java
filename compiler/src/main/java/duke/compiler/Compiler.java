@@ -143,6 +143,7 @@ public final class Compiler {
     private boolean stackOverflowStub;
     private boolean apEntry;
     private boolean userThreadEntry;
+    private boolean userAccess;
     private final Map<String, LineInfo> lineInfo = new LinkedHashMap<>();
 
     private record LineInfo(String sourceFile, List<int[]> lines) {}
@@ -280,6 +281,9 @@ public final class Compiler {
         }
         if (apEntry) {
             emitApEntry();
+        }
+        if (userAccess) {
+            emitUserAccess();
         }
         if (userThreadEntry) {
             emitUserThreadEntry();
@@ -723,6 +727,58 @@ public final class Compiler {
             requireMethod("duke/rt/Runtime", "stackExhausted", "()V");
             requireMethod("duke/rt/Runtime", "preempt", "()V");
         }
+    }
+
+    static final String USER_COPY = "user.copy";
+    static final String USER_LOAD_INT = "user.load.int";
+    static final String USER_FIXUPS = "user.fixups";
+
+    /**
+     * Magic.copyUserMemory and Magic.loadUserInt, and the table the page-fault handler finds their
+     * user accesses in (Magic.userAccessFixups).
+     */
+    String requireUserAccess(String symbol) {
+        userAccess = true;
+        return symbol;
+    }
+
+    /**
+     * Two stubs, each with one instruction that touches user memory, and the table of where a fault
+     * on that instruction carries on when the page can't be paged in (UserMode.recoverUserAccess):
+     * a count, then (fault, resume) address pairs. The copy resumes to return how many bytes rep
+     * movsb hadn't got to; the load resumes to return -1, which no zero-extended int can be.
+     */
+    private void emitUserAccess() {
+        Section text = image.text;
+        text.align(16);
+        int copy = text.size();
+        X64 a = new X64(text);
+        a.repMovsb();
+        int copyResume = text.size();
+        a.mov(Reg.RAX, Reg.RCX);
+        a.ret();
+        image.define(USER_COPY, text, copy, text.size() - copy, Image.SymbolType.FUNC);
+        image.define(USER_COPY + ".resume", text, copyResume, text.size() - copyResume, Image.SymbolType.FUNC);
+
+        text.align(16);
+        int load = text.size();
+        a.load(4, false, Reg.RAX, Mem.at(Reg.RDI));
+        a.ret();
+        int loadResume = text.size();
+        a.movImm64(Reg.RAX, -1);
+        a.ret();
+        image.define(USER_LOAD_INT, text, load, loadResume - load, Image.SymbolType.FUNC);
+        image.define(USER_LOAD_INT + ".resume", text, loadResume, text.size() - loadResume, Image.SymbolType.FUNC);
+
+        Section rodata = image.rodata;
+        rodata.align(8);
+        int table = rodata.size();
+        rodata.emit64(2);
+        for (String symbol : new String[] {USER_COPY, USER_LOAD_INT}) {
+            rodata.emitReloc(Reloc.Kind.ABS64, symbol, 0);
+            rodata.emitReloc(Reloc.Kind.ABS64, symbol + ".resume", 0);
+        }
+        image.define(USER_FIXUPS, rodata, table, rodata.size() - table, Image.SymbolType.OBJECT);
     }
 
     /** Where a new thread's first switch returns to (Magic.threadEntry). */

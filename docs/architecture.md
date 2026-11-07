@@ -257,6 +257,14 @@ allocation). That's what lets `jsc`'s programs reserve a 1 GiB heap on a 256 MiB
 `mmap` takes private anonymous mappings only, placed top down in the gap between the executable
 and the stack.
 
+System calls check a user pointer's pages first (`userReadable`, `userWritable`), then touch them
+only through `Magic.copyUserMemory` and `Magic.loadUserInt`. Each is a stub with one instruction
+that touches user memory, and `Magic.userAccessFixups` lists where a fault on it carries on, as
+Linux's exception table does. A kernel page fault there pages the address in like a ring 3 one,
+or ends the access early so the call fails with EFAULT, since a page can go away between the
+check and the copy. The check still matters: the copy only faults on what's missing, and would
+read a kernel address it was handed. `loadUserInt` is one load so a futex word can't tear.
+
 A `Process` wraps that: a pid, a parent, an address space and the kernel threads that run it.
 It frees its memory as soon as it ends but stays in the table as a zombie until its parent's
 `wait4` or, for one the kernel started, `waitFor` collects its status. A process whose parent has

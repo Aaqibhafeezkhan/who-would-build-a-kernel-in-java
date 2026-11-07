@@ -59,6 +59,10 @@ public final class Frame {
         return Magic.peekLong(frame + RIP);
     }
 
+    public static void setRip(long frame, long rip) {
+        Magic.pokeLong(frame + RIP, rip);
+    }
+
     public static long cs(long frame) {
         return Magic.peekLong(frame + CS);
     }

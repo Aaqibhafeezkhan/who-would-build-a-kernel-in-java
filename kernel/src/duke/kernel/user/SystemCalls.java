@@ -9,6 +9,7 @@ import duke.kernel.mm.PhysicalMemory;
 import duke.kernel.x86.Frame;
 import duke.kernel.x86.UserState;
 import duke.rt.Magic;
+import duke.rt.Tib;
 import duke.kernel.time.Timer;
 
 /**
@@ -187,7 +188,7 @@ public final class SystemCalls {
             long clearTid = Process.currentClearTid();
             // How a thread joining this one hears it's gone, as pthread_join does on Linux.
             if (number == EXIT && clearTid != 0 && userWritable(clearTid, 4)) {
-                Magic.pokeInt(clearTid, 0);
+                putInt(clearTid, 0);
                 Futex.wake(Scheduler.addressSpace(), clearTid, 1);
             }
             Magic.disableInterrupts();
@@ -224,8 +225,8 @@ public final class SystemCalls {
             if (!userWritable(address, 8)) {
                 return -EFAULT;
             }
-            Magic.pokeLong(address, Magic.readMsr(code == ARCH_GET_FS ? UserState.IA32_FS_BASE : UserState.IA32_KERNEL_GS_BASE));
-            return 0;
+            long base = Magic.readMsr(code == ARCH_GET_FS ? UserState.IA32_FS_BASE : UserState.IA32_KERNEL_GS_BASE);
+            return putLongs(address, base) ? 0 : -EFAULT;
         }
         return -EINVAL;
     }
@@ -254,13 +255,9 @@ public final class SystemCalls {
         if (reaped == Process.INTERRUPTED) {
             return -EINTR;
         }
-        if (reaped.pid > 0) {
-            if (status != 0) {
-                Magic.pokeInt(status, reaped.status);
-            }
-            if (usage != 0) {
-                Magic.zeroMemoryWords(usage, RUSAGE_BYTES / 8);
-            }
+        if (reaped.pid > 0 && (status != 0 && !putInt(status, reaped.status)
+                || usage != 0 && !putLongs(usage, new long[RUSAGE_BYTES / 8]))) {
+            return -EFAULT;
         }
         return reaped.pid;
     }
@@ -335,10 +332,10 @@ public final class SystemCalls {
         }
         // Before it starts, so the new thread finds its tid already there.
         if ((flags & CLONE_PARENT_SETTID) != 0) {
-            Magic.pokeInt(parentTid, thread.tid);
+            putInt(parentTid, thread.tid);
         }
         if ((flags & CLONE_CHILD_SETTID) != 0) {
-            Magic.pokeInt(childTid, thread.tid);
+            putInt(childTid, thread.tid);
         }
         thread.start();
         return thread.tid;
@@ -358,11 +355,12 @@ public final class SystemCalls {
         }
         long timeoutNanos = -1;
         if (timeout != 0) {
-            if (!userReadable(timeout, 16)) {
+            long[] timespec = userReadable(timeout, 16) ? getLongs(timeout, 2) : null;
+            if (timespec == null) {
                 return -EFAULT;
             }
-            long seconds = Magic.peekLong(timeout);
-            long nanos = Magic.peekLong(timeout + 8);
+            long seconds = timespec[0];
+            long nanos = timespec[1];
             if (seconds < 0 || nanos < 0 || nanos >= 1_000_000_000L) {
                 return -EINVAL;
             }
@@ -428,17 +426,22 @@ public final class SystemCalls {
         }
         int count = 0;
         while (count <= MAX_ARGS) {
-            if (!userReadable(array + 8L * count, 8)) {
+            long[] pointer = userReadable(array + 8L * count, 8) ? getLongs(array + 8L * count, 1) : null;
+            if (pointer == null) {
                 return null;
             }
-            if (Magic.peekLong(array + 8L * count) == 0) {
+            if (pointer[0] == 0) {
                 break;
             }
             count++;
         }
+        long[] pointers = getLongs(array, count);
+        if (pointers == null) {
+            return null;
+        }
         String[] strings = new String[count];
         for (int i = 0; i < count; i++) {
-            strings[i] = userString(Magic.peekLong(array + 8L * i));
+            strings[i] = userString(pointers[i]);
             if (strings[i] == null) {
                 return null;
             }
@@ -516,29 +519,54 @@ public final class SystemCalls {
         if (!userWritable(buffer, STAT_BYTES)) {
             return -EFAULT;
         }
-        Magic.zeroMemoryWords(buffer, STAT_BYTES / 8);
-        Magic.pokeLong(buffer + 16, 1);                          // st_nlink
-        Magic.pokeInt(buffer + 24, file.mode());                // st_mode
-        Magic.pokeLong(buffer + 48, file.size());               // st_size
-        Magic.pokeLong(buffer + 56, 512);                       // st_blksize
-        Magic.pokeLong(buffer + 64, (file.size() + 511) / 512); // st_blocks
-        return 0;
+        long[] stat = new long[STAT_BYTES / 8];
+        stat[2] = 1;                                // st_nlink
+        stat[3] = file.mode();                      // st_mode, then st_uid 0
+        stat[6] = file.size();                      // st_size
+        stat[7] = 512;                              // st_blksize
+        stat[8] = (file.size() + 511) / 512;        // st_blocks
+        return putLongs(buffer, stat) ? 0 : -EFAULT;
     }
 
     /** The NUL-terminated string at {@code address}, at most PATH_MAX bytes, or null if it isn't all readable. */
     private static String userString(long address) {
         StringBuilder sb = new StringBuilder();
-        for (long at = address; sb.length() < PATH_MAX; at++) {
-            if ((at == address || (at & (PhysicalMemory.PAGE_SIZE - 1)) == 0) && !userReadable(at, 1)) {
+        byte[] chunk = new byte[(int) PhysicalMemory.PAGE_SIZE];
+        for (long at = address; sb.length() < PATH_MAX; ) {
+            // A page at a time: the string can end before a page that isn't there.
+            int n = (int) Math.min(PhysicalMemory.PAGE_SIZE - (at & (PhysicalMemory.PAGE_SIZE - 1)), PATH_MAX - sb.length());
+            if (!userReadable(at, n) || Magic.copyUserMemory(Magic.addressOf(chunk) + Tib.ARRAY_DATA, at, n) != 0) {
                 return null;
             }
-            int c = Magic.peekByte(at) & 0xFF;
-            if (c == 0) {
-                return sb.toString();
+            for (int i = 0; i < n; i++) {
+                if (chunk[i] == 0) {
+                    return sb.toString();
+                }
+                sb.append((char) (chunk[i] & 0xFF));
             }
-            sb.append((char) c);
+            at += n;
         }
         return sb.toString();
+    }
+
+    /** Writes to user memory already checked writable; false if a page of it has gone since. */
+    static boolean putInt(long address, int value) {
+        int[] box = {value};
+        return Magic.copyUserMemory(address, Magic.addressOf(box) + Tib.ARRAY_DATA, 4) == 0;
+    }
+
+    static boolean putLongs(long address, long... values) {
+        return Magic.copyUserMemory(address, Magic.addressOf(values) + Tib.ARRAY_DATA, 8L * values.length) == 0;
+    }
+
+    static boolean putBytes(long address, byte[] bytes, long offset, long count) {
+        return Magic.copyUserMemory(address, Magic.addressOf(bytes) + Tib.ARRAY_DATA + offset, count) == 0;
+    }
+
+    /** Reads from user memory already checked readable; null if a page of it has gone since. */
+    static long[] getLongs(long address, int count) {
+        long[] values = new long[count];
+        return Magic.copyUserMemory(Magic.addressOf(values) + Tib.ARRAY_DATA, address, 8L * count) == 0 ? values : null;
     }
 
     /**
@@ -597,9 +625,7 @@ public final class SystemCalls {
         if (!userWritable(buffer, 2)) {
             return -EFAULT;
         }
-        Magic.pokeByte(buffer, (byte) '/');
-        Magic.pokeByte(buffer + 1, (byte) 0);
-        return 2;
+        return putBytes(buffer, new byte[] {'/', 0}, 0, 2) ? 2 : -EFAULT;
     }
 
     private static final int UTSNAME_FIELD_BYTES = 65;
@@ -614,22 +640,15 @@ public final class SystemCalls {
             return -EFAULT;
         }
 
-        writeUnameField(buffer, "Duke");
-        writeUnameField(buffer + UTSNAME_FIELD_BYTES, "duke");
-        writeUnameField(buffer + 2L * UTSNAME_FIELD_BYTES, "0.8");
-        writeUnameField(buffer + 3L * UTSNAME_FIELD_BYTES, "duke");
-        writeUnameField(buffer + 4L * UTSNAME_FIELD_BYTES, "x86_64");
-        writeUnameField(buffer + 5L * UTSNAME_FIELD_BYTES, "(none)");
-
-        return 0;
-    }
-
-    /** Writes one 65-byte, NUL-terminated and zero-padded field. */
-    private static void writeUnameField(long address, String value) {
-        for (int i = 0; i < UTSNAME_FIELD_BYTES; i++) {
-            byte b = i < value.length() ? (byte) value.charAt(i) : 0;
-            Magic.pokeByte(address + i, b);
+        byte[] utsname = new byte[UTSNAME_BYTES];
+        String[] fields = {"Duke", "duke", "0.8", "duke", "x86_64", "(none)"};
+        for (int f = 0; f < fields.length; f++) {
+            // Each field NUL-terminated and zero-padded, which the zeroed array already is.
+            for (int i = 0; i < fields[f].length(); i++) {
+                utsname[f * UTSNAME_FIELD_BYTES + i] = (byte) fields[f].charAt(i);
+            }
         }
+        return putBytes(buffer, utsname, 0, UTSNAME_BYTES) ? 0 : -EFAULT;
     }
 
     private static long clockGettime(long clockId, long address) {
@@ -641,18 +660,17 @@ public final class SystemCalls {
         }
 
         long millis = Timer.uptimeMillis();
-        Magic.pokeLong(address, millis / 1000);
-        Magic.pokeLong(address + 8, (millis % 1000) * NANOS_PER_MILLISECOND);
-        return 0;
+        return putLongs(address, millis / 1000, (millis % 1000) * NANOS_PER_MILLISECOND) ? 0 : -EFAULT;
     }
 
     private static long nanosleep(long request, long remaining) {
-        if (!userReadable(request, 16)) {
+        long[] timespec = userReadable(request, 16) ? getLongs(request, 2) : null;
+        if (timespec == null) {
             return -EFAULT;
         }
 
-        long seconds = Magic.peekLong(request);
-        long nanos = Magic.peekLong(request + 8);
+        long seconds = timespec[0];
+        long nanos = timespec[1];
 
         if (seconds < 0 || nanos < 0 || nanos >= NANOS_PER_SECOND) {
             return -EINVAL;
