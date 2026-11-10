@@ -133,4 +133,41 @@ final class FloatMath {
         h = h * 31 + Float.MAX_EXPONENT;
         return h;
     }
+
+    static long nextUpDownAfter() {
+        long h = 0;
+        for (double d : EDGES) {
+            h = h * 31 + Double.doubleToLongBits(Math.nextUp(d));
+            h = h * 31 + Double.doubleToLongBits(Math.nextDown(d));
+            h = h * 31 + Float.floatToIntBits(Math.nextUp((float) d));
+            h = h * 31 + Float.floatToIntBits(Math.nextDown((float) d));
+            for (double direction : EDGES) {
+                h = h * 31 + Double.doubleToLongBits(Math.nextAfter(d, direction));
+                h = h * 31 + Float.floatToIntBits(Math.nextAfter((float) d, direction));
+            }
+        }
+        return h;
+    }
+
+    static long ulp() {
+        long h = 0;
+        for (double d : EDGES) {
+            h = h * 31 + Double.doubleToLongBits(Math.ulp(d));
+            h = h * 31 + Float.floatToIntBits(Math.ulp((float) d));
+        }
+        return h;
+    }
+
+    static long scalb() {
+        int[] exponents = {-2000, -1500, -1075, -1074, -1023, -1022, -277, -149, -127, -126,
+                -1, 0, 1, 126, 127, 128, 1023, 1024, 1500, 2000};
+        long h = 0;
+        for (double d : EDGES) {
+            for (int exponent : exponents) {
+                h = h * 31 + Double.doubleToLongBits(Math.scalb(d, exponent));
+                h = h * 31 + Float.floatToIntBits(Math.scalb((float) d, exponent));
+            }
+        }
+        return h;
+    }
 }

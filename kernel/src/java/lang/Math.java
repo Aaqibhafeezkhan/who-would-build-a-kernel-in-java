@@ -216,6 +216,134 @@ public final class Math {
                 | Float.floatToRawIntBits(sign) & Integer.MIN_VALUE);
     }
 
+    public static double nextUp(double d) {
+        if (d != d || d == Double.POSITIVE_INFINITY) {
+            return d;
+        }
+        if (d == 0.0) {
+            return Double.MIN_VALUE;
+        }
+        long bits = Double.doubleToRawLongBits(d);
+        return Double.longBitsToDouble(bits + (d > 0.0 ? 1 : -1));
+    }
+
+    public static double nextDown(double d) {
+        if (d != d || d == Double.NEGATIVE_INFINITY) {
+            return d;
+        }
+        if (d == 0.0) {
+            return -Double.MIN_VALUE;
+        }
+        long bits = Double.doubleToRawLongBits(d);
+        return Double.longBitsToDouble(bits + (d > 0.0 ? -1 : 1));
+    }
+
+    public static float nextUp(float f) {
+        if (f != f || f == Float.POSITIVE_INFINITY) {
+            return f;
+        }
+        if (f == 0.0f) {
+            return Float.MIN_VALUE;
+        }
+        int bits = Float.floatToRawIntBits(f);
+        return Float.intBitsToFloat(bits + (f > 0.0f ? 1 : -1));
+    }
+
+    public static float nextDown(float f) {
+        if (f != f || f == Float.NEGATIVE_INFINITY) {
+            return f;
+        }
+        if (f == 0.0f) {
+            return -Float.MIN_VALUE;
+        }
+        int bits = Float.floatToRawIntBits(f);
+        return Float.intBitsToFloat(bits + (f > 0.0f ? -1 : 1));
+    }
+
+    public static double nextAfter(double start, double direction) {
+        if (start != start || direction != direction) {
+            return start + direction;
+        }
+        if (start == direction) {
+            return direction;
+        }
+        return start < direction ? nextUp(start) : nextDown(start);
+    }
+
+    public static float nextAfter(float start, double direction) {
+        if (start != start || direction != direction) {
+            return (float) (start + direction);
+        }
+        if (start == direction) {
+            return (float) direction;
+        }
+        return start < direction ? nextUp(start) : nextDown(start);
+    }
+
+    public static double ulp(double d) {
+        if (d != d || d == Double.POSITIVE_INFINITY || d == Double.NEGATIVE_INFINITY) {
+            return abs(d);
+        }
+        int exponent = getExponent(d);
+        if (exponent <= Double.MIN_EXPONENT - 1) {
+            return Double.MIN_VALUE;
+        }
+        return powerOfTwoD(exponent - 52);
+    }
+
+    public static float ulp(float f) {
+        if (f != f || f == Float.POSITIVE_INFINITY || f == Float.NEGATIVE_INFINITY) {
+            return abs(f);
+        }
+        int exponent = getExponent(f);
+        if (exponent <= Float.MIN_EXPONENT - 1) {
+            return Float.MIN_VALUE;
+        }
+        return powerOfTwoF(exponent - 23);
+    }
+
+    public static double scalb(double d, int scaleFactor) {
+        int n = scaleFactor;
+        if (n > 2099) {
+            n = 2099;
+        } else if (n < -2099) {
+            n = -2099;
+        }
+        int scaleIncrement = n < 0 ? -512 : 512;
+        int exponentAdjustment = n % 512;
+        d *= powerOfTwoD(exponentAdjustment);
+        n -= exponentAdjustment;
+        while (n != 0) {
+            d *= powerOfTwoD(scaleIncrement);
+            n -= scaleIncrement;
+        }
+        return d;
+    }
+
+    public static float scalb(float f, int scaleFactor) {
+        int n = scaleFactor;
+        if (n > 278) {
+            n = 278;
+        } else if (n < -278) {
+            n = -278;
+        }
+        return (float) ((double) f * powerOfTwoD(n));
+    }
+
+    private static double powerOfTwoD(int n) {
+        if (n < -1022) {
+            return Double.longBitsToDouble(1L << (n + 1074));
+        }
+        return Double.longBitsToDouble((long) (n + 1023) << 52);
+    }
+
+    private static float powerOfTwoF(int n) {
+        if (n < -126) {
+            return Float.intBitsToFloat(1 << (n + 149));
+        }
+        return Float.intBitsToFloat((n + 127) << 23);
+    }
+
     public static double sqrt(double a) {
         return Magic.sqrt(a);
     }
