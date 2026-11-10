@@ -27,6 +27,48 @@ final class FloatMath {
         return h;
     }
 
+    static long roundDouble() {
+        long h = 0;
+        for (double d : EDGES) {
+            h = h * 31 + Math.round(d);
+        }
+        return h;
+    }
+
+    static long roundFloat() {
+        long h = 0;
+        for (double d : EDGES) {
+            h = h * 31 + Math.round((float) d);
+        }
+        return h;
+    }
+
+    static long rint() {
+        long h = 0;
+        for (double d : EDGES) {
+            h = h * 31 + Double.doubleToLongBits(Math.rint(d));
+        }
+        return h;
+    }
+
+    static long signum() {
+        long h = 0;
+        for (double d : EDGES) {
+            h = h * 31 + Double.doubleToLongBits(Math.signum(d));
+            h = h * 31 + Float.floatToIntBits(Math.signum((float) d));
+        }
+        return h;
+    }
+
+    static long angleConversions() {
+        long h = 0;
+        for (double d : EDGES) {
+            h = h * 31 + Double.doubleToLongBits(Math.toRadians(d));
+            h = h * 31 + Double.doubleToLongBits(Math.toDegrees(d));
+        }
+        return h;
+    }
+
     static long sqrt() {
         long h = 0;
         for (double d : EDGES) {

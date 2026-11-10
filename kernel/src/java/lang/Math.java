@@ -445,4 +445,78 @@ public final class Math {
         }
         return r == 0 ? copySign(r, a) : r;
     }
+
+    public static long round(double a) {
+        if (a >= 0x1p63) {
+            return Long.MAX_VALUE;
+        }
+        if (a <= -0x1p63) {
+            return Long.MIN_VALUE;
+        }
+        long r = (long) a;
+        double fraction = a - r;
+        if (fraction >= 0.5) {
+            return r + 1;
+        }
+        if (fraction < -0.5) {
+            return r - 1;
+        }
+        return r;
+    }
+
+    public static int round(float a) {
+        if (a >= 0x1p31f) {
+            return Integer.MAX_VALUE;
+        }
+        if (a <= -0x1p31f) {
+            return Integer.MIN_VALUE;
+        }
+        int r = (int) a;
+        float fraction = a - r;
+        if (fraction >= 0.5f) {
+            return r + 1;
+        }
+        if (fraction < -0.5f) {
+            return r - 1;
+        }
+        return r;
+    }
+
+    public static double rint(double a) {
+        if (!(abs(a) < 0x1p52)) {
+            return a;
+        }
+        double lower = floor(a);
+        double fraction = a - lower;
+        if (fraction < 0.5) {
+            return lower;
+        }
+        double upper = ceil(a);
+        if (fraction > 0.5 || (((long) lower & 1L) != 0)) {
+            return upper;
+        }
+        return lower;
+    }
+
+    public static double signum(double a) {
+        if (a != a || a == 0.0) {
+            return a;
+        }
+        return a > 0.0 ? 1.0 : -1.0;
+    }
+
+    public static float signum(float a) {
+        if (a != a || a == 0.0f) {
+            return a;
+        }
+        return a > 0.0f ? 1.0f : -1.0f;
+    }
+
+    public static double toRadians(double angdeg) {
+        return angdeg * (PI / 180.0);
+    }
+
+    public static double toDegrees(double angrad) {
+        return angrad * (180.0 / PI);
+    }
 }
