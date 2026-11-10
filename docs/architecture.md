@@ -540,7 +540,10 @@ Stack overflow is a real, catchable `StackOverflowError`. Every prologue compare
 the stack limit, which sits 16 KiB above the bottom of the stack. Crossing it calls a stub that lowers
 the limit to 4 KiB above the bottom and throws from inside that reserve. The unwinder restores the
 normal limit when it resumes in a handler. Overflowing the reserve too panics instead of
-corrupting memory. The check is 20 bytes per method.
+corrupting memory. The check is 20 bytes per method. An interrupt from ring 0 runs its handler on
+the interrupted stack, maybe just above the limit, where an overflow couldn't be caught. So the
+entry stub lowers the limit to the emergency mark for the handler and puts it back after, keeping
+a preemption request pending if there was one before or the handler made one.
 
 The limit, the saved limit during a preemption request and the stack base live in a per-CPU block
 that GS points at (`IA32_GS_BASE`), so every CPU checks against its own running thread's stack. The

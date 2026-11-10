@@ -935,10 +935,10 @@ public final class Compiler {
      * frame and resets it, so the handler's Java computes with Java's rounding and leaves whatever
      * it interrupted intact. That can be ring 3, with every register and its own MXCSR, or Java
      * partway through a bytecode, between loading xmm0 and storing it back. Leaves rsp at the
-     * save area, with the frame's address in the slot above it.
+     * save area, with the frame's address in the slot above it and two scratch slots after that.
      */
     private void saveFpu(X64 a) {
-        a.aluImm(X64.Alu.SUB, true, Reg.RSP, FPU_STATE_BYTES + 16);
+        a.aluImm(X64.Alu.SUB, true, Reg.RSP, FPU_STATE_BYTES + 32);
         a.aluImm(X64.Alu.AND, true, Reg.RSP, -16);
         a.store(8, Mem.at(Reg.RSP, FPU_STATE_BYTES), Reg.RAX);
         a.fxsave(Mem.at(Reg.RSP));
@@ -965,7 +965,8 @@ public final class Compiler {
      * returns with iretq. From
      * ring 3 it swaps GS in and out around that, so the kernel's per-CPU block is GS throughout.
      * Frame layout from the address passed: r15 ... rax (15 slots, r15 lowest), vector, error code,
-     * then the CPU's rip, cs, rflags, rsp, ss.
+     * then the CPU's rip, cs, rflags, rsp, ss. From ring 0 the handler runs on the interrupted
+     * stack, so the stack limit drops for it ({@link #lowerStackLimit}).
      */
     private void emitInterruptStubs() {
         Section text = image.text;
@@ -990,10 +991,21 @@ public final class Compiler {
         a.bind(fromKernel);
         a.mov(Reg.RAX, Reg.RSP);
         saveFpu(a);
+        X64.Label lowered = new X64.Label();
+        a.cmpByte(Mem.at(Reg.RAX, 8 * SAVED_REGISTERS.length + 24), KERNEL_CODE);
+        a.jcc(Cond.NE, lowered);
+        lowerStackLimit(a);
+        a.bind(lowered);
         a.push(Reg.RAX);
         a.push(Reg.RAX);
         a.call(methodSymbol(INTERRUPTS, "dispatch", "(J)V"));
         a.aluImm(X64.Alu.ADD, true, Reg.RSP, 16);
+        X64.Label restored = new X64.Label();
+        a.load(8, false, Reg.RAX, Mem.at(Reg.RSP, FPU_STATE_BYTES));
+        a.cmpByte(Mem.at(Reg.RAX, 8 * SAVED_REGISTERS.length + 24), KERNEL_CODE);
+        a.jcc(Cond.NE, restored);
+        restoreStackLimit(a);
+        a.bind(restored);
         restoreFpu(a);
         for (int i = SAVED_REGISTERS.length - 1; i >= 0; i--) {
             a.pop(SAVED_REGISTERS[i]);
@@ -1033,6 +1045,50 @@ public final class Compiler {
             rodata.emitReloc(Reloc.Kind.ABS64, "interrupt." + vector, 0);
         }
         image.define(INTERRUPT_STUBS, rodata, table, rodata.size() - table, Image.SymbolType.OBJECT);
+    }
+
+    /**
+     * For a handler interrupting ring 0, which runs on the stack it interrupted: rsp can be just
+     * above the limit, and a StackOverflowError from the handler's prologue has nowhere to go. So
+     * the handler gets the emergency mark as its limit, with the limit and saved limit it found kept
+     * in saveFpu's scratch slots. Checks that were off stay off. From ring 3 rsp is at the kernel
+     * stack's top, and the handler may switch threads or never come back here.
+     */
+    private void lowerStackLimit(X64 a) {
+        X64.Label off = new X64.Label();
+        a.load(8, false, Reg.RCX, STACK_LIMIT);
+        a.store(8, Mem.at(Reg.RSP, FPU_STATE_BYTES + 8), Reg.RCX);
+        a.load(8, false, Reg.RDX, STACK_LIMIT_SAVED);
+        a.store(8, Mem.at(Reg.RSP, FPU_STATE_BYTES + 16), Reg.RDX);
+        a.test(true, Reg.RCX, Reg.RCX);
+        a.jcc(Cond.E, off);
+        a.load(8, false, Reg.RCX, STACK_BASE);
+        a.lea(Reg.RCX, Mem.at(Reg.RCX, STACK_EMERGENCY));
+        a.store(8, STACK_LIMIT, Reg.RCX);
+        a.bind(off);
+    }
+
+    /**
+     * Puts back the limit {@link #lowerStackLimit} found, with a preemption request pending if
+     * there was one then or the handler made one (the timer's). Saving and restoring the limit
+     * alone would drop the timer's request, and letting the handler see a pending one would have
+     * its prologue take it with interrupts off, where it can't yield.
+     */
+    private void restoreStackLimit(X64 a) {
+        X64.Label request = new X64.Label();
+        X64.Label install = new X64.Label();
+        a.load(8, false, Reg.RCX, Mem.at(Reg.RSP, FPU_STATE_BYTES + 8));
+        a.load(8, false, Reg.RDX, Mem.at(Reg.RSP, FPU_STATE_BYTES + 16));
+        a.aluImm(X64.Alu.CMP, true, Reg.RCX, PREEMPT);
+        a.jcc(Cond.E, request);
+        a.mov(Reg.RDX, Reg.RCX);
+        a.aluImm(X64.Alu.CMP, true, STACK_LIMIT, PREEMPT);
+        a.jcc(Cond.NE, install);
+        a.bind(request);
+        a.store(8, STACK_LIMIT_SAVED, Reg.RDX);
+        a.movImm64(Reg.RCX, PREEMPT);
+        a.bind(install);
+        a.store(8, STACK_LIMIT, Reg.RCX);
     }
 
     String requireSyscallEntry() {

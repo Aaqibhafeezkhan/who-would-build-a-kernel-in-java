@@ -36,7 +36,7 @@ public final class Frame {
 
     /** Where the entry stub saved the interrupted code's x87 and SSE state (Compiler.saveFpu). */
     public static long fpuState(long frame) {
-        return (frame - FPU_STATE_BYTES - 16) & -16;
+        return (frame - FPU_STATE_BYTES - 32) & -16;
     }
 
     public static long register(long frame, int index) {
