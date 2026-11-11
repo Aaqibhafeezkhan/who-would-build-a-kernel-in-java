@@ -97,8 +97,50 @@ public final class String implements Comparable<String> {
         return -1;
     }
 
+    public int indexOf(String other) {
+        return indexOf(other, 0);
+    }
+
+    public int indexOf(String other, int fromIndex) {
+        int start = Math.max(fromIndex, 0);
+        int last = value.length - other.value.length;
+        if (other.value.length == 0) {
+            return Math.min(start, value.length);
+        }
+        if (start > last) {
+            return -1;
+        }
+        for (int i = start; i <= last; i++) {
+            if (regionMatches(i, other)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public int lastIndexOf(String other) {
+        int start = value.length - other.value.length;
+        if (other.value.length == 0) {
+            return value.length;
+        }
+        for (int i = start; i >= 0; i--) {
+            if (regionMatches(i, other)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public boolean contains(String sequence) {
+        return indexOf(sequence) >= 0;
+    }
+
     public boolean startsWith(String prefix) {
-        return regionMatches(0, prefix);
+        return startsWith(prefix, 0);
+    }
+
+    public boolean startsWith(String prefix, int toffset) {
+        return regionMatches(toffset, prefix);
     }
 
     public boolean endsWith(String suffix) {
@@ -106,7 +148,7 @@ public final class String implements Comparable<String> {
     }
 
     private boolean regionMatches(int offset, String other) {
-        if (offset < 0 || offset + other.value.length > value.length) {
+        if (offset < 0 || offset > value.length - other.value.length) {
             return false;
         }
         for (int i = 0; i < other.value.length; i++) {
@@ -248,15 +290,6 @@ public final class String implements Comparable<String> {
             }
         }
         return parts;
-    }
-
-    private int indexOf(String other, int fromIndex) {
-        for (int i = fromIndex; i + other.value.length <= value.length; i++) {
-            if (regionMatches(i, other)) {
-                return i;
-            }
-        }
-        return -1;
     }
 
     public static String valueOf(Object object) {
