@@ -459,6 +459,17 @@ final class UserModeTest {
         assertEquals(5, f.errorCode, "present, read, user");
     }
 
+    static void testKernelMemoryIsOffLimitsForWrites() {
+        long kernel = Magic.addressOf(new int[1]);
+        Program p = new Program();
+        // mov [kernel], rax
+        p.load(new Code().b(0x48, 0xA3).imm64(kernel));
+        UserMode.Fault f = fault(p);
+        assertEquals(PF, f.vector, "page fault");
+        assertEquals(kernel, f.address, "cr2");
+        assertEquals(7, f.errorCode, "present, write, user");
+    }
+
     static void testCodeIsReadOnly() {
         Program p = new Program();
         // mov byte [base], 0

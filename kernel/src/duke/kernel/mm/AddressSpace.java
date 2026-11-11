@@ -108,11 +108,19 @@ public final class AddressSpace {
      * {@link Tlb#flush}.
      */
     public boolean copyOnWrite(long address) {
+        // Higher-half addresses are negative. Without this, ring 3 writing to the kernel's writable
+        // pages would be told to retry forever instead of killed.
+        if (address < 0 || address >= END) {
+            return false;
+        }
         long page = address & -PAGE;
         long old = -1;
         long interrupts = SpinLock.lockInterruptsOff(pageInLock);
         try {
             long flags = table.flags(page);
+            if ((flags & PageTable.USER) == 0) {
+                return false;
+            }
             if ((flags & PageTable.WRITABLE) != 0) {
                 // Another thread got here first, and this CPU's TLB still had the read-only entry.
                 Magic.invalidatePage(page);

@@ -1,12 +1,14 @@
 package duke.ktest;
 
 import static duke.ktest.Assert.assertEquals;
+import static duke.ktest.Assert.assertThrows;
 import static duke.ktest.Assert.assertTrue;
 
 import duke.kernel.Scheduler;
 import duke.kernel.mm.AddressSpace;
 import duke.kernel.mm.PageTable;
 import duke.kernel.mm.PhysicalMemory;
+import duke.kernel.user.SystemCalls;
 import duke.rt.Magic;
 import duke.rt.Tib;
 
@@ -87,6 +89,63 @@ final class CopyOnWriteTest {
             assertEquals(0, Magic.peekByte(view(child, p.data)), "the child's page untouched");
         } finally {
             child.free();
+            p.free();
+        }
+    }
+
+    static void testKernelPagesAreNeverCopied() {
+        UserModeTest.Program p = new UserModeTest.Program();
+        try {
+            assertTrue(!p.space.copyOnWrite(Magic.addressOf(new int[1])), "writable, but the kernel's");
+            assertTrue(!p.space.copyOnWrite(AddressSpace.END), "just past the lower half");
+        } finally {
+            p.free();
+        }
+    }
+
+    static void testSystemCallWritesThroughACopyOnWritePage() {
+        UserModeTest.Program p = new UserModeTest.Program();
+        int offset = 64;
+        p.load(new UserModeTest.Code().movEax(SystemCalls.GETCWD).movEdi((int) (p.data + offset)).movRsi(2)
+                .syscall().exitWithResult());
+        AddressSpace child = p.space.copy();
+        try {
+            assertEquals(2, p.run(), "getcwd bytes written");
+            assertTrue(p.space.table().translate(p.data) != child.table().translate(p.data), "copied first");
+            assertEquals('/', Magic.peekByte(p.kernelView(offset)) & 0xFF, "into the parent's copy");
+            assertEquals(0, Magic.peekByte(view(child, p.data + offset)), "not the child's");
+        } finally {
+            child.free();
+            p.free();
+        }
+    }
+
+    static void testForkOutOfMemoryGivesEveryFrameBack() {
+        UserModeTest.Program p = new UserModeTest.Program();
+        // In another PML4 slot from the program, so the copy fails after sharing its pages.
+        long far = 0x80_0000_0000L;
+        p.space.allocate(far, PageTable.WRITABLE);
+        // Grows the heap and the share counts now, so the copy below only takes frames for tables.
+        p.space.copy().free();
+        long data = p.space.table().translate(p.data);
+        long[] taken = new long[(int) PhysicalMemory.freeFrames()];
+        int n = 0;
+        try {
+            // The child's root, three tables for the program's pages and one of three for far's.
+            while (PhysicalMemory.freeFrames() > 5) {
+                taken[n++] = PhysicalMemory.allocate();
+            }
+            assertThrows(OutOfMemoryError.class, p.space::copy, "no table for far");
+            assertEquals(5, PhysicalMemory.freeFrames(), "the child's frames back");
+        } finally {
+            for (int i = 0; i < n; i++) {
+                PhysicalMemory.free(taken[i]);
+            }
+        }
+        try {
+            assertTrue(p.space.copyOnWrite(p.data), "the parent writes");
+            assertEquals(data, p.space.table().translate(p.data), "its pages aren't shared any more");
+        } finally {
             p.free();
         }
     }
