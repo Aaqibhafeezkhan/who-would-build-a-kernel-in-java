@@ -70,6 +70,9 @@ Library code runs in a kernel: Strings are Latin-1, and interrupt handlers must 
 - Run `make test` before pushing. CI runs the same targets on your PR automatically (GitHub may
   hold the very first run from a brand-new account for approval, as a spam guard).
 - Match the surrounding code: comments explain *why*, not *what*.
+- Duke is GPLv2 with the Classpath Exception, the same license as OpenJDK, so porting OpenJDK code
+  is fine as long as its copyright header comes along at the top of the file. Code from anywhere
+  else needs a GPLv2-compatible license, with its notice kept.
 - CI fails on trailing whitespace, including whitespace-only lines. `git diff --check master`
   shows any locally, and most editors follow `.editorconfig` to avoid it.
 - Maintainers: "Enable auto-merge" on an approved PR (or `gh pr merge --auto --squash`) merges it

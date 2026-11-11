@@ -96,6 +96,8 @@ The first build downloads a pinned Limine release into `build/limine`.
 
 The framebuffer font is [Spleen](https://github.com/fcambus/spleen) 8x16 by Frederic Cambus,
 BSD-2-Clause; the license travels with it in `kernel/src/duke/kernel/Font.java`.
+The math routines in `kernel/src/java/lang/StrictMath.java` and `Trigonometry.java` come from
+fdlibm, under Sun's notice in each file.
 
 ## Contributing
 
@@ -103,3 +105,8 @@ New contributors are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup an
 work, and [`good first issue`](https://github.com/JackFurton/who-would-build-a-kernel-in-java/labels/good%20first%20issue)
 lists small, self-contained places to start. The [project board](https://github.com/users/JackFurton/projects/1)
 shows what's open and what's done.
+
+## License
+
+GPLv2 with the Classpath Exception, the same as OpenJDK, so programs built with Duke can carry any
+license. See [LICENSE](LICENSE).
