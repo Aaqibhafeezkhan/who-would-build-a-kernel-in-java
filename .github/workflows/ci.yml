@@ -30,7 +30,7 @@ jobs:
 
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -42,9 +42,26 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
 
       - name: Install QEMU and OVMF
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf
+          # The runners' apt mirror has stopped resolving for half an hour at a time, and one
+          # attempt can sit on DNS timeouts for 20 minutes. So the network steps get two minutes
+          # each, and the install, which needs no network, has no limit of its own: killing dpkg
+          # partway would leave packages half configured.
+          packages="qemu-system-x86 ovmf"
+          for attempt in 1 2 3; do
+            if timeout 120 sudo apt-get update \
+                && timeout 120 sudo apt-get install -y --no-install-recommends --download-only $packages; then
+              sudo apt-get install -y --no-install-recommends $packages
+              exit 0
+            fi
+            getent hosts azure.archive.ubuntu.com archive.ubuntu.com github.com || true
+            # Every pocket goes through this list. kernel.org's copy is off Canonical's DNS,
+            # which is what has failed so far.
+            echo http://mirrors.edge.kernel.org/ubuntu/ | sudo tee /etc/apt/apt-mirrors.txt
+            [ "$attempt" = 3 ] || sleep 60
+          done
+          exit 1
 
       - name: Compiler unit tests
         run: make unit-test
