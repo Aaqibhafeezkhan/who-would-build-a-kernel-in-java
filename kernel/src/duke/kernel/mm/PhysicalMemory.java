@@ -17,6 +17,8 @@ public final class PhysicalMemory {
     /** Guards the bitmap: the heap grows under its own lock and thread stacks under the scheduler's. */
     private static final int[] LOCK = new int[1];
     private static FrameBitmap frames;
+    /** Per frame, how many page tables map it besides the first. Made by the first fork. */
+    private static int[] sharers;
     private static long hhdm;
 
     private PhysicalMemory() {
@@ -104,6 +106,47 @@ public final class PhysicalMemory {
             frames.free(physical / PAGE_SIZE);
         } finally {
             SpinLock.unlockInterruptsOff(LOCK, flags);
+        }
+    }
+
+    /** Makes room to count sharers, so {@link #share} allocates nothing under a spin lock. */
+    public static void prepareSharing() {
+        if (sharers == null) {
+            int[] counts = new int[(int) frames.pages()];
+            long flags = SpinLock.lockInterruptsOff(LOCK);
+            if (sharers == null) {
+                sharers = counts;
+            }
+            SpinLock.unlockInterruptsOff(LOCK, flags);
+        }
+    }
+
+    /** One more page table maps {@code physical}, which then takes one more {@link #drop} to free. */
+    public static void share(long physical) {
+        long flags = SpinLock.lockInterruptsOff(LOCK);
+        sharers[(int) (physical / PAGE_SIZE)]++;
+        SpinLock.unlockInterruptsOff(LOCK, flags);
+    }
+
+    /** Whether some other page table maps {@code physical} too. */
+    public static boolean shared(long physical) {
+        long flags = SpinLock.lockInterruptsOff(LOCK);
+        boolean shared = sharers != null && sharers[(int) (physical / PAGE_SIZE)] > 0;
+        SpinLock.unlockInterruptsOff(LOCK, flags);
+        return shared;
+    }
+
+    /** A page table stops mapping {@code physical}: frees it if that was the last one. */
+    public static void drop(long physical) {
+        long flags = SpinLock.lockInterruptsOff(LOCK);
+        int page = (int) (physical / PAGE_SIZE);
+        boolean last = sharers == null || sharers[page] == 0;
+        if (!last) {
+            sharers[page]--;
+        }
+        SpinLock.unlockInterruptsOff(LOCK, flags);
+        if (last) {
+            free(physical);
         }
     }
 

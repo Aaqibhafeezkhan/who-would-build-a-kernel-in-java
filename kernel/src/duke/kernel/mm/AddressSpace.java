@@ -1,11 +1,13 @@
 package duke.kernel.mm;
 
+import duke.rt.Magic;
 import duke.rt.SpinLock;
 import java.util.Arrays;
 
 /**
- * A process's memory: its own lower half, and the kernel's higher half shared with everyone. Every
- * frame mapped into it belongs to it and goes back with {@link #free}.
+ * A process's memory: its own lower half, and the kernel's higher half shared with everyone. A
+ * frame mapped into it is its own, or shared copy-on-write with the other side of a fork
+ * ({@link #copyOnWrite}), and goes back with {@link #free} once nothing else maps it.
  *
  * <p>Pages are mapped up front with {@link #allocate}, or reserved with {@link #reserve} and mapped
  * zeroed the first time they're touched ({@link #pageIn}), so a process can ask for far more than
@@ -100,6 +102,49 @@ public final class AddressSpace {
     }
 
     /**
+     * A write fault on a present page: if it's copy-on-write, gives this table a frame of its own
+     * (the shared one itself once nothing else maps it) and returns true for the write to run
+     * again. False for any other page, or when memory's run out. Interrupts must be on, for
+     * {@link Tlb#flush}.
+     */
+    public boolean copyOnWrite(long address) {
+        long page = address & -PAGE;
+        long old = -1;
+        long interrupts = SpinLock.lockInterruptsOff(pageInLock);
+        try {
+            long flags = table.flags(page);
+            if ((flags & PageTable.WRITABLE) != 0) {
+                // Another thread got here first, and this CPU's TLB still had the read-only entry.
+                Magic.invalidatePage(page);
+                return true;
+            }
+            if ((flags & PageTable.COPY_ON_WRITE) == 0) {
+                return false;
+            }
+            long frame = table.translate(page);
+            if (PhysicalMemory.shared(frame)) {
+                long copy = PhysicalMemory.tryAllocate();
+                if (copy < 0) {
+                    return false;
+                }
+                Magic.copyMemory(PhysicalMemory.toVirtual(copy), PhysicalMemory.toVirtual(frame), PAGE);
+                old = frame;
+                frame = copy;
+            }
+            table.map(page, frame, flags & (PageTable.USER | PageTable.NO_EXECUTE) | PageTable.WRITABLE);
+            Magic.invalidatePage(page);
+        } finally {
+            SpinLock.unlockInterruptsOff(pageInLock, interrupts);
+        }
+        if (old >= 0) {
+            // This process's other CPUs can still read the shared frame through their TLBs.
+            Tlb.flush(table);
+            PhysicalMemory.drop(old);
+        }
+        return true;
+    }
+
+    /**
      * munmap: takes [start, start + length) out of the reservations and frees every page mapped
      * there, reserved or not, once no CPU can still reach it. Any of it may be unmapped already.
      * Both must be page-aligned. Interrupts must be on, for {@link Tlb#flush}.
@@ -147,7 +192,7 @@ public final class AddressSpace {
             SpinLock.unlockInterruptsOff(pageInLock, interrupts);
             Tlb.flush(table);
             for (int i = 0; i < count; i++) {
-                PhysicalMemory.free(frames[i]);
+                PhysicalMemory.drop(frames[i]);
             }
         }
     }
@@ -184,16 +229,22 @@ public final class AddressSpace {
     }
 
     /**
-     * A copy for fork: every mapped page copied, every reservation and the mmap range kept, so
-     * the child pages in what the parent never touched. Frees what it took if memory runs out.
+     * A copy for fork: every mapped page shared copy-on-write, every reservation and the mmap range
+     * kept, so the child pages in what the parent never touched. Frees what it took if memory runs
+     * out. Interrupts must be on, for {@link Tlb#flush}.
      */
     public synchronized AddressSpace copy() {
         AddressSpace child = new AddressSpace();
-        try {
-            table.copyLowerHalfInto(child.table);
-        } catch (OutOfMemoryError e) {
+        PhysicalMemory.prepareSharing();
+        // Under the fault lock, or a write fault could make a page writable again after it's shared.
+        long interrupts = SpinLock.lockInterruptsOff(pageInLock);
+        boolean shared = table.shareLowerHalfInto(child.table);
+        SpinLock.unlockInterruptsOff(pageInLock, interrupts);
+        // Before the child runs: until then another thread's TLB can still write what it sees.
+        Tlb.flush(table);
+        if (!shared) {
             child.free();
-            throw e;
+            throw new OutOfMemoryError("out of physical memory");
         }
         child.ranges = Arrays.copyOf(ranges, ranges.length);
         child.reserved = reserved;

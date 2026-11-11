@@ -16,6 +16,8 @@ public final class PageTable {
     public static final long CACHE_DISABLE = 1 << 4;
     public static final long HUGE = 1 << 7;
     public static final long GLOBAL = 1 << 8;
+    /** One of the bits the CPU leaves to software: read-only only until fork's copy is broken. */
+    public static final long COPY_ON_WRITE = 1 << 9;
     public static final long NO_EXECUTE = 1L << 63;
 
     public static final long HUGE_PAGE_SIZE = 2 * 1024 * 1024;
@@ -45,13 +47,16 @@ public final class PageTable {
     /** Gives every higher-half PML4 entry a PDPT, so the slot set never changes again. */
     public void fillHigherHalf() {
         for (long slot = HIGHER_HALF; slot < 2 * HIGHER_HALF; slot++) {
-            entry(slot << 39 | 0xffff_0000_0000_0000L, 3, true, 0);
+            if (entry(slot << 39 | 0xffff_0000_0000_0000L, 3, true, 0) == 0) {
+                throw new OutOfMemoryError("out of physical memory");
+            }
         }
     }
 
     /**
-     * Frees every lower-half 4 KiB page and the tables under them, then the root. Only for a table
-     * from {@link #sharingHigherHalf} that no CPU has loaded: the higher half isn't its to free.
+     * Drops every lower-half 4 KiB page (PhysicalMemory.drop) and frees the tables under them, then
+     * the root. Only for a table from {@link #sharingHigherHalf} that no CPU has loaded: the higher
+     * half isn't its to free.
      */
     public void freeLowerHalf() {
         freeTables(root, 4, HIGHER_HALF);
@@ -59,14 +64,17 @@ public final class PageTable {
     }
 
     /**
-     * Gives {@code into} a copy of every lower-half 4 KiB page: a new frame with the same contents
-     * and permissions at the same address. For fork, so eager: no copy-on-write yet.
+     * For fork: maps every lower-half 4 KiB page into {@code into} as well, with writable ones
+     * turned copy-on-write in both. The caller flushes this table's TLBs, which may still let a
+     * thread write to what's now shared. Allocates nothing on the heap (after
+     * PhysicalMemory.prepareSharing), so it can run under a spin lock: false if a table for
+     * {@code into} couldn't be had, with what's shared so far left for freeing {@code into} to drop.
      */
-    public void copyLowerHalfInto(PageTable into) {
-        copyTables(root, 4, HIGHER_HALF, 0, into);
+    public boolean shareLowerHalfInto(PageTable into) {
+        return shareTables(root, 4, HIGHER_HALF, 0, into);
     }
 
-    private static void copyTables(long table, int level, long entries, long base, PageTable into) {
+    private static boolean shareTables(long table, int level, long entries, long base, PageTable into) {
         for (int i = 0; i < entries; i++) {
             long value = Magic.peekLong(PhysicalMemory.toVirtual(table) + 8 * i);
             if ((value & PRESENT) == 0) {
@@ -77,14 +85,20 @@ public final class PageTable {
                 throw new IllegalStateException("huge page in a lower half being copied");
             }
             if (level > 1) {
-                copyTables(value & ADDRESS_MASK, level - 1, 512, virtual, into);
+                if (!shareTables(value & ADDRESS_MASK, level - 1, 512, virtual, into)) {
+                    return false;
+                }
                 continue;
             }
-            long frame = PhysicalMemory.allocate();
-            Magic.copyMemory(PhysicalMemory.toVirtual(frame), PhysicalMemory.toVirtual(value & ADDRESS_MASK),
-                    PhysicalMemory.PAGE_SIZE);
-            into.map(virtual, frame, value & (WRITABLE | USER | NO_EXECUTE));
+            // Read-only pages are shared as they are, writable ones until either side writes.
+            long shared = (value & WRITABLE) != 0 ? value & ~WRITABLE | COPY_ON_WRITE : value;
+            if (!into.tryMap(virtual, shared & ADDRESS_MASK, shared & (USER | NO_EXECUTE | COPY_ON_WRITE))) {
+                return false;
+            }
+            PhysicalMemory.share(shared & ADDRESS_MASK);
+            Magic.pokeLong(PhysicalMemory.toVirtual(table) + 8 * i, shared);
         }
+        return true;
     }
 
     private static void freeTables(long table, int level, long entries) {
@@ -98,8 +112,10 @@ public final class PageTable {
             }
             if (level > 1) {
                 freeTables(value & ADDRESS_MASK, level - 1, 512);
+                PhysicalMemory.free(value & ADDRESS_MASK);
+            } else {
+                PhysicalMemory.drop(value & ADDRESS_MASK);
             }
-            PhysicalMemory.free(value & ADDRESS_MASK);
         }
     }
 
@@ -114,14 +130,28 @@ public final class PageTable {
     }
 
     public void map(long virtual, long physical, long flags) {
+        if (!tryMap(virtual, physical, flags)) {
+            throw new OutOfMemoryError("out of physical memory");
+        }
+    }
+
+    /** Like {@link #map}, but false instead of throwing when a table can't be allocated. */
+    public boolean tryMap(long virtual, long physical, long flags) {
         checkAligned(virtual, physical, PhysicalMemory.PAGE_SIZE);
         long entry = entry(virtual, 1, true, flags & USER);
+        if (entry == 0) {
+            return false;
+        }
         Magic.pokeLong(entry, physical | flags | PRESENT);
+        return true;
     }
 
     public void mapHuge(long virtual, long physical, long flags) {
         checkAligned(virtual, physical, HUGE_PAGE_SIZE);
         long entry = entry(virtual, 2, true, flags & USER);
+        if (entry == 0) {
+            throw new OutOfMemoryError("out of physical memory");
+        }
         Magic.pokeLong(entry, physical | flags | PRESENT | HUGE);
     }
 
@@ -228,7 +258,8 @@ public final class PageTable {
 
     /**
      * Virtual address of the entry for {@code virtual} at {@code level} (1 = PT, 2 = PD), creating
-     * missing intermediate tables when {@code create}, else returning 0 where one is missing.
+     * missing intermediate tables when {@code create}. 0 where one is missing and can't be (or
+     * mustn't be) created.
      * {@code user} is {@link #USER} or 0, added to every intermediate entry on the way.
      */
     private long entry(long virtual, int level, boolean create, long user) {
@@ -240,7 +271,11 @@ public final class PageTable {
                 if (!create) {
                     return 0;
                 }
-                value = PhysicalMemory.allocateZeroed() | PRESENT | WRITABLE | user;
+                long frame = PhysicalMemory.tryAllocateZeroed();
+                if (frame < 0) {
+                    return 0;
+                }
+                value = frame | PRESENT | WRITABLE | user;
                 Magic.pokeLong(slot, value);
                 tables++;
             } else if ((value & user) != user) {

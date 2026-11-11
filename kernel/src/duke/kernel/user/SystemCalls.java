@@ -555,15 +555,34 @@ public final class SystemCalls {
     /** Writes to user memory already checked writable; false if a page of it has gone since. */
     static boolean putInt(long address, int value) {
         int[] box = {value};
-        return Magic.copyUserMemory(address, Magic.addressOf(box) + Tib.ARRAY_DATA, 4) == 0;
+        return copyOut(address, Magic.addressOf(box) + Tib.ARRAY_DATA, 4);
     }
 
     static boolean putLongs(long address, long... values) {
-        return Magic.copyUserMemory(address, Magic.addressOf(values) + Tib.ARRAY_DATA, 8L * values.length) == 0;
+        return copyOut(address, Magic.addressOf(values) + Tib.ARRAY_DATA, 8L * values.length);
     }
 
     static boolean putBytes(long address, byte[] bytes, long offset, long count) {
-        return Magic.copyUserMemory(address, Magic.addressOf(bytes) + Tib.ARRAY_DATA + offset, count) == 0;
+        return copyOut(address, Magic.addressOf(bytes) + Tib.ARRAY_DATA + offset, count);
+    }
+
+    /**
+     * The copy stops at a copy-on-write page, since breaking one may flush TLBs and the fault
+     * comes with interrupts off. So it's broken here and the copy carries on.
+     */
+    private static boolean copyOut(long address, long source, long bytes) {
+        long stuck = -1;
+        for (long done = 0; ; ) {
+            long left = Magic.copyUserMemory(address + done, source + done, bytes - done);
+            if (left == 0) {
+                return true;
+            }
+            done = bytes - left;
+            if (address + done == stuck || !Scheduler.addressSpace().copyOnWrite(address + done)) {
+                return false;
+            }
+            stuck = address + done;
+        }
     }
 
     /** Reads from user memory already checked readable; null if a page of it has gone since. */
@@ -613,7 +632,10 @@ public final class SystemCalls {
         return userAccessible(address, length, PageTable.USER | PageTable.WRITABLE);
     }
 
-    /** Whether every page of [address, address + length) is mapped in this thread's process with {@code flags}. */
+    /**
+     * Whether every page of [address, address + length) is mapped in this thread's process with
+     * {@code flags}. A copy-on-write page counts as writable: copyOut breaks the copy.
+     */
     private static boolean userAccessible(long address, long length, long flags) {
         if (address < 0 || length < 0 || length > AddressSpace.END - address) {
             return false;
@@ -626,7 +648,11 @@ public final class SystemCalls {
             if ((table.flags(page) & PageTable.USER) == 0) {
                 space.pageIn(page);
             }
-            if ((table.flags(page) & flags) != flags) {
+            long has = table.flags(page);
+            if ((has & PageTable.COPY_ON_WRITE) != 0) {
+                has |= PageTable.WRITABLE;
+            }
+            if ((has & flags) != flags) {
                 return false;
             }
         }

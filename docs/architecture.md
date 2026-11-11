@@ -280,13 +280,21 @@ memory, so `read`, `lseek` and `fstat` never touch the disk; anything that would
 echoed and editable, as from a terminal in canonical mode. The shell is waiting on the process
 meanwhile, so the two never read the keyboard at once.
 
-`fork` copies the caller eagerly (every mapped page, plus its reservations, so untouched memory
-stays lazy in the child too; no copy-on-write yet), shares its open files as Linux does, and
-starts the child's thread with `Magic.enterUserWith`, which loads all fifteen saved registers
+`fork` shares the caller's pages copy-on-write and keeps its reservations, so untouched memory
+stays lazy in the child too. It shares its open files as Linux does, and starts the child's thread with `Magic.enterUserWith`, which loads all fifteen saved registers
 instead of zeroing them, with `rax` 0 and the parent's FS, GS and FPU state. `execve` loads the new
 image into a fresh address space first, so a bad path or file returns an error to the old one;
 then it leaves user mode the way `exit` does, with `UserMode.EXECED` as the status, and the
 process's thread frees the old image and runs the new one. The pid, parent and files carry over.
+
+Copy-on-write marks every writable page read-only in both tables, with a bit the CPU leaves to
+software (`PageTable.COPY_ON_WRITE`), and `PhysicalMemory` counts each frame's extra mappings. A
+write fault gets its own copy, or keeps the frame once nothing else maps it. The copy has to flush
+the TLBs of the process's other CPUs, which might still read the old frame, so the ring 3 fault
+handler turns interrupts on for it. A system call writing to such a page faults too (CR0.WP is set
+on every CPU). That fault ends `Magic.copyUserMemory` early, and `SystemCalls.copyOut` breaks the
+copy with interrupts on and carries on. Fork flushes the parent's TLBs before the child runs, since
+a thread elsewhere could still write through a stale writable entry.
 
 `clone` makes threads only (`CLONE_THREAD` and friends; a new process is still `fork`'s job): a
 kernel thread in the same process, starting from the caller's registers on the stack it was given,

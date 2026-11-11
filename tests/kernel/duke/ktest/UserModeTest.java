@@ -36,12 +36,11 @@ final class UserModeTest {
         final long data = BASE + 2 * PAGE;
         final AddressSpace space = new AddressSpace();
         private final long codeFrame;
-        private final long dataFrame;
 
         Program() {
             codeFrame = space.allocate(base, 0);
             long nx = KernelAddressSpace.noExecuteSupported() ? PageTable.NO_EXECUTE : 0;
-            dataFrame = space.allocate(data, PageTable.WRITABLE | nx);
+            space.allocate(data, PageTable.WRITABLE | nx);
             space.setMapRange(MAP_FLOOR, MAP_TOP);
         }
 
@@ -50,9 +49,9 @@ final class UserModeTest {
             return this;
         }
 
-        /** The data page through the direct map. */
+        /** The data page through the direct map: whichever frame it's on, since a fork's write moves it. */
         long kernelView(int offset) {
-            return PhysicalMemory.toVirtual(dataFrame) + offset;
+            return PhysicalMemory.toVirtual(space.table().translate(data)) + offset;
         }
 
         long run() {
@@ -78,9 +77,13 @@ final class UserModeTest {
             load(code);
             Process p = start(parent);
             started.accept(p);
-            for (int tries = 0; Magic.peekByte(kernelView(PARKED)) == 0; tries++) {
+            // ended() first: an ended process has freed the table kernelView walks.
+            for (int tries = 0; ; tries++) {
                 if (p.ended() || tries >= 1000) {
                     throw new AssertionError("never parked");
+                }
+                if (Magic.peekByte(kernelView(PARKED)) != 0) {
+                    break;
                 }
                 Thread.sleep(5);
             }

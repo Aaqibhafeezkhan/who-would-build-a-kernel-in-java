@@ -48,6 +48,10 @@ public final class UserMode {
     private static final long SYSCALL_CLEARS = 0x47700;
     private static final long INTERRUPT_FLAG = 0x200;
     private static final int PAGE_FAULT = 14;
+    // A page fault's error code bits.
+    private static final long FAULT_PRESENT = 1;
+    private static final long FAULT_WRITE = 2;
+    private static final long CR0_WRITE_PROTECT = 1 << 16;
     /** Saved registers, vector, error code, then the CPU's rip, cs, rflags, rsp and ss (Frame). */
     private static final int INTERRUPT_FRAME_BYTES = 176;
     private static final long FAULTED = Long.MIN_VALUE;
@@ -65,8 +69,12 @@ public final class UserMode {
     private UserMode() {
     }
 
-    /** The syscall instruction's MSRs, which each CPU has its own copy of. */
+    /**
+     * The syscall instruction's MSRs, which each CPU has its own copy of, and CR0.WP, so a system
+     * call writing to a copy-on-write page faults and breaks the copy as ring 3's write would.
+     */
     public static void initOnThisCpu() {
+        Magic.writeCr0(Magic.readCr0() | CR0_WRITE_PROTECT);
         Magic.writeMsr(IA32_EFER, Magic.readMsr(IA32_EFER) | EFER_SYSCALL);
         Magic.writeMsr(IA32_STAR, (long) Gdt.USER_BASE << 48 | (long) Gdt.KERNEL_CODE << 32);
         Magic.writeMsr(IA32_LSTAR, Magic.syscallEntry());
@@ -118,12 +126,23 @@ public final class UserMode {
     }
 
     /**
-     * A page fault in ring 3 that the process's reservations cover: maps the page and returns true,
-     * for the instruction to run again.
+     * A page fault in ring 3 on a page the process's reservations cover, or a write to a
+     * copy-on-write page: maps the page and returns true, for the instruction to run again.
      */
     public static boolean pageIn(long frame) {
-        boolean notPresent = (Frame.errorCode(frame) & 1) == 0;
-        return notPresent && Scheduler.addressSpace().pageIn(Magic.readCr2());
+        long error = Frame.errorCode(frame);
+        long address = Magic.readCr2();
+        if ((error & FAULT_PRESENT) == 0) {
+            return Scheduler.addressSpace().pageIn(address);
+        }
+        if ((error & FAULT_WRITE) == 0) {
+            return false;
+        }
+        // On for the copy's TLB flush, as they were in ring 3.
+        Magic.enableInterrupts();
+        boolean copied = Scheduler.addressSpace().copyOnWrite(address);
+        Magic.disableInterrupts();
+        return copied;
     }
 
     /**
@@ -144,7 +163,8 @@ public final class UserMode {
         if (resume == 0 || address < 0 || address >= AddressSpace.END || Scheduler.addressSpace() == null) {
             return false;
         }
-        if (!pageIn(frame)) {
+        // A copy-on-write page is the caller's to break, with interrupts on (SystemCalls.copyOut).
+        if ((Frame.errorCode(frame) & FAULT_PRESENT) != 0 || !Scheduler.addressSpace().pageIn(address)) {
             Frame.setRip(frame, resume);
         }
         return true;
