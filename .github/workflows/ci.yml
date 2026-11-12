@@ -5,8 +5,11 @@ on:
     branches: [master]
   pull_request:
 
+# A new push to a pull request cancels its older run, but every master commit gets its own run:
+# sharing a group, the next merge cancelled the one before, which then never had a result. The
+# metrics job retries its push, so master runs can overlap.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
 # Read-only by default: pull requests, including ones from forks, run untrusted code. Only the
