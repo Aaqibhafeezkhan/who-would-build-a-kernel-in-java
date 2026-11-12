@@ -25,6 +25,7 @@ public final class SystemCalls {
     public static final int FSTAT = 5;
     public static final int LSEEK = 8;
     public static final int MMAP = 9;
+    public static final int PIPE = 22;
     public static final int MUNMAP = 11;
     public static final int DUP = 32;
     public static final int DUP2 = 33;
@@ -42,6 +43,7 @@ public final class SystemCalls {
     public static final int EXIT = 60;
     public static final int EXIT_GROUP = 231;
     public static final int OPENAT = 257;
+    public static final int PIPE2 = 293;
 
     public static final int ESRCH = 3;
     public static final int EINTR = 4;
@@ -63,6 +65,7 @@ public final class SystemCalls {
     public static final int ESPIPE = 29;
     public static final int EROFS = 30;
     public static final int ENAMETOOLONG = 36;
+    public static final int EPIPE = 32;
     public static final int ERANGE = 34;
     public static final int ENOSYS = 38;
     public static final int ETIMEDOUT = 110;
@@ -79,6 +82,7 @@ public final class SystemCalls {
     public static final int O_CREAT = 0x40;
     public static final int O_TRUNC = 0x200;
     public static final int O_DIRECTORY = 0x10000;
+    public static final int O_CLOEXEC = 0x80000;
     public static final int AT_FDCWD = -100;
     /** sizeof(struct stat) on x86-64. */
     public static final int STAT_BYTES = 144;
@@ -144,6 +148,8 @@ public final class SystemCalls {
             result = files().dup(a0);
         } else if (number == DUP2) {
             result = files().dup2(a0, a1);
+        } else if (number == PIPE || number == PIPE2) {
+            result = pipe(a0, number == PIPE2 ? a1 : 0);
         } else if (number == FSTAT) {
             result = fstat(a0, a1);
         } else if (number == LSEEK) {
@@ -511,7 +517,37 @@ public final class SystemCalls {
         } catch (IllegalStateException e) {
             return -EIO;
         }
-        return files().add(file);
+        return files().add(file, (flags & O_CLOEXEC) != 0);
+    }
+
+    /** O_CLOEXEC only: there's no O_NONBLOCK yet, and a caller asking for it can't do without. */
+    private static long pipe(long fds, long flags) {
+        if ((flags & ~(long) O_CLOEXEC) != 0) {
+            return -EINVAL;
+        }
+        if (!userWritable(fds, 8)) {
+            return -EFAULT;
+        }
+        boolean cloexec = flags != 0;
+        Pipe pipe = new Pipe();
+        FileTable table = files();
+        int read = table.add(pipe.reader, cloexec);
+        int write = read < 0 ? read : table.add(pipe.writer, cloexec);
+        // The descriptors hold the ends now, or nothing does and the pipe goes.
+        pipe.reader.release();
+        pipe.writer.release();
+        if (write < 0) {
+            if (read >= 0) {
+                table.close(read);
+            }
+            return write;
+        }
+        if (!putInt(fds, read) || !putInt(fds + 4, write)) {
+            table.close(read);
+            table.close(write);
+            return -EFAULT;
+        }
+        return 0;
     }
 
     private static long fstat(long fd, long buffer) {

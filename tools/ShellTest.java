@@ -114,6 +114,15 @@ public class ShellTest {
                 Thread.sleep(500);
                 type(serial, "typed at duke\n");
             }, "you said: typed at duke");
+            failures += check("a pipeline", () -> type(serial, "run /bin/cat hello.txt | /bin/echoline\n"),
+                    "you said: hello from FAT32");
+            failures += check("a pipeline needs a program on each side", () -> type(serial, "run /bin/hello |\n"),
+                    "usage: run <path> [args] [| <path> [args]]...");
+            failures += check("ctrl-c ends every program in a pipeline", () -> {
+                type(serial, "run /bin/spin | /bin/echoline\n");
+                Thread.sleep(500);
+                type(serial, "\u0003");
+            }, "^C\nduke> ");
             long framesBefore = freeFrames(serial);
             failures += check("ctrl-c stops a spinning program", () -> {
                 type(serial, "run /bin/spin\n");

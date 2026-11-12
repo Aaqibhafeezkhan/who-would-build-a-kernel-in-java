@@ -123,7 +123,7 @@ public final class Shell {
         }
         switch (words.get(0)) {
             case "help" -> {
-                Console.println("commands: help, uptime, mem, gc, cpus, threads, pci, ls [path], cat <path>, hexdump <path>, run <path> [args], echo <text>, clear, panic");
+                Console.println("commands: help, uptime, mem, gc, cpus, threads, pci, ls [path], cat <path>, hexdump <path>, run <path> [args] [| <path> [args]], echo <text>, clear, panic");
                 if (!Commands.names().isEmpty()) {
                     StringBuilder more = new StringBuilder("also:");
                     for (int i = 0; i < Commands.names().size(); i++) {
@@ -168,14 +168,11 @@ public final class Shell {
                 }
             }
             case "run" -> {
-                if (words.size() < 2) {
-                    Console.println("usage: run <path> [args]");
+                List<String[]> stages = pipeline(words);
+                if (stages == null) {
+                    Console.println("usage: run <path> [args] [| <path> [args]]...");
                 } else {
-                    String[] argv = new String[words.size() - 1];
-                    for (int i = 0; i < argv.length; i++) {
-                        argv[i] = words.get(i + 1);
-                    }
-                    run(argv);
+                    run(stages);
                 }
             }
             case "echo" -> Console.println(line.substring(4).strip());
@@ -205,48 +202,90 @@ public final class Shell {
         }
     }
 
-    /** Runs a static executable from the disk as a process, and says how it ended unless it exited 0. */
-    private static void run(String[] argv) {
-        String path = argv[0];
+    /** The argv of each program in {@code run a | b}, or null if one of them is missing. */
+    private static List<String[]> pipeline(List<String> words) {
+        List<String[]> stages = new ArrayList<>();
+        int from = 1;
+        for (int i = 1; i <= words.size(); i++) {
+            if (i < words.size() && !words.get(i).equals("|")) {
+                continue;
+            }
+            if (i == from) {
+                return null;
+            }
+            String[] argv = new String[i - from];
+            for (int j = 0; j < argv.length; j++) {
+                argv[j] = words.get(from + j);
+            }
+            stages.add(argv);
+            from = i + 1;
+        }
+        return stages;
+    }
+
+    /**
+     * Runs static executables from the disk as processes, each one's output piped into the next,
+     * and says how each ended unless it exited 0.
+     */
+    private static void run(List<String[]> stages) {
         Fat fs = Fat.mounted();
         if (fs == null) {
             Console.println("run: no filesystem mounted");
             return;
         }
-        Elf.Image image;
-        try {
-            image = Elf.load(fs.read(path), argv);
-        } catch (IllegalArgumentException e) {
-            Console.println("run: " + path + ": " + e.getMessage());
-            return;
-        }
-        try {
-            long status = waitInForeground(Process.start(path, null, image));
-            if (status != 0) {
-                Console.println(path + ": exit status " + status);
+        String[] paths = new String[stages.size()];
+        Elf.Image[] images = new Elf.Image[stages.size()];
+        for (int i = 0; i < images.length; i++) {
+            String[] argv = stages.get(i);
+            paths[i] = argv[0];
+            try {
+                images[i] = Elf.load(fs.read(paths[i]), argv);
+            } catch (IllegalArgumentException e) {
+                Console.println("run: " + paths[i] + ": " + e.getMessage());
+                for (int j = 0; j < i; j++) {
+                    images[j].space.free();
+                }
+                return;
             }
-        } catch (UserMode.Fault f) {
-            Console.println(path + ": " + f.getMessage());
-        } catch (InterruptedException e) {
-            Console.println(path + ": interrupted");
+        }
+        Process[] processes = Process.startPipeline(paths, images);
+        waitInForeground(processes);
+        for (int i = 0; i < processes.length; i++) {
+            try {
+                long status = processes[i].waitFor();
+                if (status != 0) {
+                    Console.println(paths[i] + ": exit status " + status);
+                }
+            } catch (UserMode.Fault f) {
+                Console.println(paths[i] + ": " + f.getMessage());
+            } catch (InterruptedException e) {
+                Console.println(paths[i] + ": interrupted");
+            }
         }
     }
 
-    /** Waits for {@code p} to end, killing it if Ctrl-C is typed meanwhile, and returns its exit status. */
-    private static long waitInForeground(Process p) throws InterruptedException {
+    /** Waits for every one of {@code processes} to end, killing them all if Ctrl-C is typed meanwhile. */
+    private static void waitInForeground(Process[] processes) {
         Input.setForeground(true);
         try {
-            while (!p.ended()) {
-                if (Input.takeInterrupt()) {
-                    Console.println("^C");
-                    p.kill();
+            for (Process p : processes) {
+                while (!p.ended()) {
+                    if (Input.takeInterrupt()) {
+                        Console.println("^C");
+                        for (Process q : processes) {
+                            q.kill();
+                        }
+                    }
+                    Thread.sleep(10);
                 }
-                Thread.sleep(10);
+            }
+        } catch (InterruptedException e) {
+            for (Process q : processes) {
+                q.kill();
             }
         } finally {
             Input.setForeground(false);
         }
-        return p.waitFor();
     }
 
     private static void cat(String path) {

@@ -280,6 +280,16 @@ memory, so `read`, `lseek` and `fstat` never touch the disk; anything that would
 echoed and editable, as from a terminal in canonical mode. The shell is waiting on the process
 meanwhile, so the two never read the keyboard at once.
 
+`pipe` and `pipe2` make a 64 KiB buffer with a read end and a write end. A read waits while it's
+empty and returns 0 once no write end is open anywhere; a write waits for room and gets `EPIPE`
+once no read end is (there are no signals, so no SIGPIPE). Knowing that takes reference counts:
+every descriptor slot holds one on its open file, taken by `dup`, `dup2` and `fork` and dropped by
+`close`, by `execve` for `O_CLOEXEC` descriptors, and for all of a process's descriptors when it
+ends. A pipe's maker holds one on each end until descriptors do, so neither looks closed in
+between. Waiters poll for their process being killed every 10 ms, as console reads and futexes do.
+The shell's `run a | b` starts both with a pipe from `a`'s stdout to `b`'s stdin, and Ctrl-C ends
+every program in it.
+
 `fork` shares the caller's pages copy-on-write and keeps its reservations, so untouched memory
 stays lazy in the child too. It shares its open files as Linux does, and starts the child's thread with `Magic.enterUserWith`, which loads all fifteen saved registers
 instead of zeroing them, with `rax` 0 and the parent's FS, GS and FPU state. `execve` loads the new
@@ -317,9 +327,9 @@ needs nothing extra, since the children it waits on are in the same group and wa
 The wait status says SIGINT, and the memory goes back as for any exit.
 
 System calls so far: `read` (0), `write` (1), `open` (2), `close` (3), `fstat` (5), `lseek` (8),
-`mmap` (9), `dup` (32), `dup2` (33), `nanosleep` (35), `getpid` (39), `clone` (56), `fork` (57), `execve` (59), `exit` (60), `wait4` (61),
-`uname` (63), `getcwd` (79), `getppid` (110), `arch_prctl` (158), `gettid` (186), `futex` (202), `clock_gettime` (228), `exit_group` (231)
-and `openat` (257), with Linux's numbers. `SystemCalls.dispatch` is entered from
+`mmap` (9), `pipe` (22), `dup` (32), `dup2` (33), `nanosleep` (35), `getpid` (39), `clone` (56), `fork` (57), `execve` (59), `exit` (60), `wait4` (61),
+`uname` (63), `getcwd` (79), `getppid` (110), `arch_prctl` (158), `gettid` (186), `futex` (202), `clock_gettime` (228), `exit_group` (231),
+`openat` (257) and `pipe2` (293), with Linux's numbers. `SystemCalls.dispatch` is entered from
 the syscall stub without a class-initialization check, so `SystemCalls` keeps no statics that need
 one. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
 the host, put on a FAT disk, and run one after another through the shell in a single boot, with

@@ -118,6 +118,29 @@ public final class Process {
         return start(name, parent, image.space, image.entry, image.stack);
     }
 
+    /**
+     * Starts each image as a process the kernel has to {@link #waitFor}, with a pipe from each one's
+     * stdout to the next one's stdin, as a shell's {@code a | b} does.
+     */
+    public static Process[] startPipeline(String[] names, Elf.Image[] images) {
+        Process[] processes = new Process[images.length];
+        for (int i = 0; i < images.length; i++) {
+            Elf.Image image = images[i];
+            processes[i] = new Process(names[i], null, image.space, image.entry, image.stack, null, null);
+        }
+        for (int i = 0; i + 1 < images.length; i++) {
+            Pipe pipe = new Pipe();
+            processes[i].files.replace(1, pipe.writer);
+            processes[i + 1].files.replace(0, pipe.reader);
+            pipe.writer.release();
+            pipe.reader.release();
+        }
+        for (Process p : processes) {
+            p.thread.start();
+        }
+        return processes;
+    }
+
     /** The process the calling thread runs, or null for a kernel thread. */
     public static Process current() {
         return Thread.currentThread() instanceof Runner r ? r.process : null;
@@ -224,6 +247,7 @@ public final class Process {
             }
             // execve only goes ahead with one thread, so nothing else runs in the old image.
             space.free();
+            files.closeForExec();
             space = pendingImage.space;
             self.entry = pendingImage.entry;
             self.stack = pendingImage.stack;
@@ -242,6 +266,8 @@ public final class Process {
             }
         }
         space.free();
+        // Before it counts as ended, so whoever waits for it finds its pipes closed too.
+        files.closeAll();
         synchronized (LOCK) {
             ended = true;
             interrupted = fault == null && !groupExited && status == UserMode.KILLED;
