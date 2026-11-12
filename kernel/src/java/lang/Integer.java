@@ -76,12 +76,20 @@ public final class Integer extends Number implements Comparable<Integer> {
         return Long.toString(i);
     }
 
+    public static String toString(int i, int radix) {
+        return Long.toString(i, radix);
+    }
+
     public static String toHexString(int i) {
         return Long.toUnsignedString(i & 0xFFFF_FFFFL, 4);
     }
 
     public static String toBinaryString(int i) {
         return Long.toUnsignedString(i & 0xFFFF_FFFFL, 1);
+    }
+
+    public static String toOctalString(int i) {
+        return Long.toUnsignedString(i & 0xFFFF_FFFFL, 3);
     }
 
     public static int parseInt(String s) {
@@ -163,6 +171,15 @@ public final class Integer extends Number implements Comparable<Integer> {
 
     public static int lowestOneBit(int i) {
         return i & -i;
+    }
+
+    public static int reverse(int i) {
+        int reversed = 0;
+        for (int bit = 0; bit < 32; bit++) {
+            reversed = (reversed << 1) | (i & 1);
+            i >>>= 1;
+        }
+        return reversed;
     }
 
     public static int rotateLeft(int i, int distance) {

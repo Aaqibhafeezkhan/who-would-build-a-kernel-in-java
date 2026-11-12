@@ -68,13 +68,22 @@ public final class Long extends Number implements Comparable<Long> {
     }
 
     public static String toString(long value) {
-        byte[] buffer = new byte[20];
+        return toString(value, 10);
+    }
+
+    public static String toString(long value, int radix) {
+        if (radix < 2 || radix > 36) {
+            radix = 10;
+        }
+        byte[] buffer = new byte[65];
         int pos = buffer.length;
         // Work in negatives: MIN_VALUE has no positive counterpart.
         long v = value < 0 ? value : -value;
+        String digits = "0123456789abcdefghijklmnopqrstuvwxyz";
         do {
-            buffer[--pos] = (byte) ('0' - (int) (v % 10));
-            v /= 10;
+            int digit = (int) -(v % radix);
+            buffer[--pos] = (byte) digits.charAt(digit);
+            v /= radix;
         } while (v != 0);
         if (value < 0) {
             buffer[--pos] = '-';
@@ -88,6 +97,10 @@ public final class Long extends Number implements Comparable<Long> {
 
     public static String toBinaryString(long i) {
         return toUnsignedString(i, 1);
+    }
+
+    public static String toOctalString(long i) {
+        return toUnsignedString(i, 3);
     }
 
     /** {@code shift} is bits per digit: 1 for binary, 4 for hex. */
@@ -213,5 +226,25 @@ public final class Long extends Number implements Comparable<Long> {
 
     public static long rotateRight(long i, int distance) {
         return (i >>> distance) | (i << -distance);
+    }
+
+    public static long reverse(long i) {
+        long reversed = 0;
+        for (int bit = 0; bit < 64; bit++) {
+            reversed = (reversed << 1) | (i & 1);
+            i >>>= 1;
+        }
+        return reversed;
+    }
+
+    public static long reverseBytes(long i) {
+        return ((i >>> 56))
+                | ((i >>> 40) & 0x000000000000ff00L)
+                | ((i >>> 24) & 0x0000000000ff0000L)
+                | ((i >>> 8) & 0x00000000ff000000L)
+                | ((i << 8) & 0x000000ff00000000L)
+                | ((i << 24) & 0x0000ff0000000000L)
+                | ((i << 40) & 0x00ff000000000000L)
+                | (i << 56);
     }
 }
