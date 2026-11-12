@@ -7,6 +7,7 @@ import duke.kernel.Scheduler;
 import duke.kernel.Smp;
 import duke.kernel.acpi.Madt;
 import duke.kernel.time.HpetClock;
+import duke.rt.Backtrace;
 import duke.rt.Heap;
 import duke.rt.Magic;
 import duke.rt.Tib;
@@ -90,6 +91,55 @@ final class SmpTest {
             spinner.join();
         }
         assertTrue(most >= 2, "at most " + most + " cpus busy at once");
+    }
+
+    static void testLocateFindsEveryOtherCpu() {
+        for (int cpu = 0; cpu < Smp.cpuCount(); cpu++) {
+            if (cpu != Magic.cpuIndex() && Smp.online(cpu)) {
+                long[] where = Smp.locate(cpu);
+                assertTrue(where != null, "cpu " + cpu + " answered");
+                assertTrue(!Backtrace.describe(where[0]).startsWith("0x"), "cpu " + cpu + " in compiled code");
+            }
+        }
+    }
+
+    private static volatile int spinningOn;
+    private static volatile boolean spinning;
+
+    // What the NMI is for: a CPU that ignores the kick, spinning with interrupts off.
+    static void testLocateFindsACpuWithInterruptsOff() throws InterruptedException {
+        if (Smp.onlineCount() < 2) {
+            return;
+        }
+        for (int attempt = 0; attempt < 5; attempt++) {
+            spinning = false;
+            Thread spinner = new Thread(() -> {
+                Magic.disableInterrupts();
+                spinningOn = Magic.cpuIndex();
+                spinning = true;
+                // Bounded, in case it landed on the CPU that's meant to locate it.
+                long until = HpetClock.nanos() + 1_000_000_000L;
+                while (spinning && HpetClock.nanos() < until) {
+                    Magic.pause();
+                }
+                spinning = false;
+                Magic.enableInterrupts();
+            });
+            spinner.start();
+            while (!spinning && spinner.isAlive()) {
+                Magic.pause();
+            }
+            long[] where = spinning ? Smp.locate(spinningOn) : null;
+            boolean stillSpinning = spinning;
+            spinning = false;
+            spinner.join();
+            if (where != null && stillSpinning) {
+                String at = Backtrace.describe(where[0]);
+                assertTrue(at.contains("SmpTest"), "located at " + at);
+                return;
+            }
+        }
+        throw new AssertionError("the spinner never ran on another CPU long enough to locate");
     }
 
     // Four threads allocating at once, each checking its own lists, with collections stopping the others.

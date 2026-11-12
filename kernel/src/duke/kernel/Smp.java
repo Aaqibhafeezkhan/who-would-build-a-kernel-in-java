@@ -6,10 +6,12 @@ import duke.kernel.mm.KernelStacks;
 import duke.kernel.time.HpetClock;
 import duke.kernel.time.Timer;
 import duke.kernel.user.UserMode;
+import duke.kernel.x86.Frame;
 import duke.kernel.x86.Gdt;
 import duke.kernel.x86.Idt;
 import duke.kernel.x86.Interrupts;
 import duke.kernel.x86.LocalApic;
+import duke.rt.Backtrace;
 import duke.rt.Magic;
 import duke.rt.SpinLock;
 
@@ -51,6 +53,12 @@ public final class Smp {
     private static final int[] STOPPING = new int[1];
     /** Each stopped CPU's frame in stopIfRequested, where the collector starts its walk; 0 while running. */
     private static final long[] STOPPED_FRAMES = new long[MAX_CPUS];
+    // locate's question to each CPU, then the answer from its NMI handler: rip and rbp, and a flag
+    // set after them.
+    private static final int[] LOCATE_ASKED = new int[MAX_CPUS];
+    private static final long[] LOCATED = new long[2 * MAX_CPUS];
+    private static final int[] LOCATE_ANSWERED = new int[MAX_CPUS];
+    private static final long LOCATE_TIMEOUT_NANOS = 100_000_000;
     private static int cpus = 1;
 
     private Smp() {
@@ -164,7 +172,7 @@ public final class Smp {
                 nextKick = now + KICK_INTERVAL_NANOS;
             }
             if (now > deadline) {
-                Panic.panic("cpu ", Integer.toString(straggler), " never stopped for a collection");
+                straggled(straggler);
             }
             Magic.pause();
         }
@@ -209,6 +217,55 @@ public final class Smp {
         }
         STOPPED_FRAMES[cpu] = 0;
         Magic.enableInterrupts();
+    }
+
+    private static void straggled(int cpu) {
+        long[] where = locate(cpu);
+        Panic.begin("cpu ", Integer.toString(cpu), " never stopped for a collection");
+        Backtrace.printCaller();
+        if (where == null) {
+            // Not even an NMI got through, so it isn't running at all: under emulation, its thread
+            // hasn't been scheduled.
+            Console.println("cpu " + cpu + " didn't answer an NMI either");
+        } else {
+            Console.println("cpu " + cpu + " was at:");
+            Backtrace.print(where[0], where[1]);
+        }
+        Panic.haltForever();
+    }
+
+    /**
+     * Where {@code cpu} is running, as {rip, rbp} for {@link Backtrace#print}, asked by NMI so it
+     * answers with interrupts off too; null if it doesn't answer within 100 ms. It carries on
+     * afterwards. Reading its stack is only safe while it's stuck.
+     */
+    public static long[] locate(int cpu) {
+        LOCATE_ANSWERED[cpu] = 0;
+        LOCATE_ASKED[cpu] = 1;
+        LocalApic.sendNmi(APIC_IDS[cpu]);
+        long deadline = HpetClock.nanos() + LOCATE_TIMEOUT_NANOS;
+        while (LOCATE_ANSWERED[cpu] == 0) {
+            if (HpetClock.nanos() > deadline) {
+                LOCATE_ASKED[cpu] = 0;
+                return null;
+            }
+            Magic.pause();
+        }
+        return new long[] {LOCATED[2 * cpu], LOCATED[2 * cpu + 1]};
+    }
+
+    /** From the NMI handler, so it allocates nothing: false if the NMI wasn't from {@link #locate}. */
+    public static boolean answerLocate(long frame) {
+        int cpu = Magic.cpuIndex();
+        if (LOCATE_ASKED[cpu] == 0) {
+            return false;
+        }
+        LOCATE_ASKED[cpu] = 0;
+        LOCATED[2 * cpu] = Frame.rip(frame);
+        // A ring 3 stack is in another address space, so the trace stops at the user rip.
+        LOCATED[2 * cpu + 1] = Frame.cs(frame) == Gdt.KERNEL_CODE ? Frame.register(frame, Frame.RBP) : 0;
+        LOCATE_ANSWERED[cpu] = 1;
+        return true;
     }
 
     private static int stillRunning() {

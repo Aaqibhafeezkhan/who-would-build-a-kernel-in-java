@@ -110,7 +110,11 @@ them go before sweeping, which only touches dead objects and can't race an alloc
 lands while a CPU is between threads, with preemption requests ignored, is lost, so the collector
 kicks again every millisecond until every CPU has stopped. Nothing may allocate under the
 scheduler lock: a CPU spinning on it has interrupts off and can't stop, so that collection would
-never start (the heap panics instead). Under `-smp 4` in QEMU the stops cost
+never start (the heap panics instead). A CPU that still hasn't stopped after five seconds is a
+panic, and `Smp.locate` asks it where it is first with an NMI, which gets through with interrupts
+off: its handler saves rip and rbp without allocating (the collector holds the heap lock), and the
+panic prints that CPU's stack under its own, or says it didn't answer at all, which under QEMU
+means its thread wasn't running. Under `-smp 4` in QEMU the stops cost
 `make conformance-gc` about 40%, with every allocation waking three CPUs.
 Java objects still come from the fixed bump arena in `.bss` (see Objects below).
 

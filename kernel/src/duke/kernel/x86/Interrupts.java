@@ -2,6 +2,7 @@ package duke.kernel.x86;
 
 import duke.kernel.Console;
 import duke.kernel.Panic;
+import duke.kernel.Smp;
 import duke.kernel.user.UserMode;
 import duke.rt.Backtrace;
 import duke.rt.Magic;
@@ -53,6 +54,9 @@ public final class Interrupts {
             return;
         }
         if (vector == PAGE_FAULT && UserMode.recoverUserAccess(frame)) {
+            return;
+        }
+        if (vector == NMI && Smp.answerLocate(frame)) {
             return;
         }
         Handler handler = HANDLERS[vector];

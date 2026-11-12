@@ -26,6 +26,7 @@ public final class LocalApic {
     private static final int DIVIDE_BY_16 = 0x3;
     private static final int LEVEL_ASSERT = 1 << 14;
     private static final int DELIVERY_PENDING = 1 << 12;
+    private static final int DELIVER_NMI = 4 << 8;
 
     private static long base;
 
@@ -54,6 +55,15 @@ public final class LocalApic {
 
     /** Sends {@code vector} to the CPU with local APIC id {@code apicId}. */
     public static void sendIpi(int apicId, int vector) {
+        send(apicId, vector);
+    }
+
+    /** An NMI, which gets through even with interrupts off. */
+    public static void sendNmi(int apicId) {
+        send(apicId, DELIVER_NMI);
+    }
+
+    private static void send(int apicId, int command) {
         // Interrupts off: a handler's own IPI between the two writes would take our destination.
         long flags = Magic.flags();
         Magic.disableInterrupts();
@@ -61,7 +71,7 @@ public final class LocalApic {
             Magic.pause();
         }
         write(ICR_HIGH, apicId << 24);
-        write(ICR_LOW, LEVEL_ASSERT | vector);
+        write(ICR_LOW, LEVEL_ASSERT | command);
         SpinLock.restoreInterrupts(flags);
     }
 
