@@ -23,7 +23,7 @@ JS_SRCS       := $(wildcard kernel/js/*.js)
 KERNEL_JAVAC  := javac --system none -XDstringConcat=inline
 COMPILER_SRCS := $(shell find compiler/src/main -name '*.java') compiler/build.gradle.kts
 
-.PHONY: all compiler run debug test unit-test boot-test conformance conformance-gc panic-tests ktest shell-test js-test user-test disasm clean
+.PHONY: all compiler run debug test unit-test boot-test conformance conformance-gc panic-tests ktest shell-test js-test user-test c-test disasm clean
 
 all: $(BUILD)/esp/boot/kernel.elf
 
@@ -63,7 +63,7 @@ run: all
 debug: all
 	tools/qemu.sh $(BUILD)/esp -serial mon:stdio -s -S
 
-test: unit-test js-test boot-test conformance panic-tests ktest shell-test user-test
+test: unit-test js-test boot-test conformance panic-tests ktest shell-test user-test c-test
 
 unit-test:
 	./gradlew -q :compiler:test
@@ -98,6 +98,10 @@ js-test: $(DUKEC) all
 # Docker unless this is x86-64 Linux; USER_BACKENDS=duke skips it.
 user-test: $(DUKEC) all
 	java tools/UserJavaTests.java
+
+# C programs built static against musl, Linux vs Duke. Needs musl-gcc on x86-64 Linux, or Docker.
+c-test: all
+	java tools/CTests.java
 
 disasm: $(BUILD)/kernel.elf
 	objdump -d -M intel $(BUILD)/kernel.elf | less

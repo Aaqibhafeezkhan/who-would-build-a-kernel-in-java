@@ -3,5 +3,5 @@
 FROM eclipse-temurin:25-jdk-noble
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends qemu-system-x86 ovmf make git nodejs \
+    && apt-get install -y --no-install-recommends qemu-system-x86 ovmf make git nodejs musl-tools binutils \
     && rm -rf /var/lib/apt/lists/*

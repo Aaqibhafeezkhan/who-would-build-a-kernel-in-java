@@ -35,6 +35,9 @@ public final class AddressSpace {
     // Where mmap looks for room: the gap between the executable and the stack, filled from the top.
     private long mapFloor = END;
     private long mapTop = END;
+    // The program break: brk's heap runs from breakStart, just past the executable, to breakEnd.
+    private long breakStart;
+    private long breakEnd;
 
     public PageTable table() {
         return table;
@@ -57,10 +60,22 @@ public final class AddressSpace {
         if ((start | length) % PAGE != 0) {
             throw new IllegalArgumentException("unaligned reservation");
         }
+        int next = -1;
         for (int i = 0; i < reserved; i++) {
             if (start < ranges[3 * i + 1] && ranges[3 * i] < start + length) {
                 throw new IllegalArgumentException("overlaps another reservation");
             }
+            if (ranges[3 * i + 2] == flags && (ranges[3 * i + 1] == start || ranges[3 * i] == start + length)) {
+                next = i;
+            }
+        }
+        // Grown onto a neighbour instead, as brk does a page at a time, so pageIn has fewer to search.
+        if (next >= 0) {
+            long interrupts = SpinLock.lockInterruptsOff(pageInLock);
+            ranges[3 * next] = Math.min(ranges[3 * next], start);
+            ranges[3 * next + 1] = Math.max(ranges[3 * next + 1], start + length);
+            SpinLock.unlockInterruptsOff(pageInLock, interrupts);
+            return;
         }
         long[] r = 3 * reserved == ranges.length ? Arrays.copyOf(ranges, 2 * ranges.length) : ranges;
         long interrupts = SpinLock.lockInterruptsOff(pageInLock);
@@ -211,6 +226,37 @@ public final class AddressSpace {
         mapTop = top;
     }
 
+    /** Starts brk's heap, empty, at {@code start}. */
+    public synchronized void setBreak(long start) {
+        breakStart = start;
+        breakEnd = start;
+    }
+
+    /**
+     * brk: moves the end of the heap to {@code end}, reserving or unmapping the pages between, and
+     * returns where it ends up. As on Linux, a move it can't make (below the start, into a mapping
+     * or past the mmap range) leaves it where it was, and libc reads that as failure.
+     */
+    public synchronized long setBreakEnd(long end) {
+        if (breakStart == 0 || end < breakStart || end > mapTop) {
+            return breakEnd;
+        }
+        long from = (breakEnd + PAGE - 1) & -PAGE;
+        long to = (end + PAGE - 1) & -PAGE;
+        if (to > from) {
+            long flags = PageTable.WRITABLE | (KernelAddressSpace.noExecuteSupported() ? PageTable.NO_EXECUTE : 0);
+            try {
+                reserve(from, to - from, flags);
+            } catch (IllegalArgumentException e) {
+                return breakEnd;
+            }
+        } else if (to < from) {
+            unmap(to, from - to);
+        }
+        breakEnd = end;
+        return end;
+    }
+
     /** Reserves {@code length} bytes (rounded up to pages) somewhere free, or returns -1 if there's no room. */
     public synchronized long map(long length, long flags) {
         long bytes = (length + PAGE - 1) & -PAGE;
@@ -258,6 +304,8 @@ public final class AddressSpace {
         child.reserved = reserved;
         child.mapFloor = mapFloor;
         child.mapTop = mapTop;
+        child.breakStart = breakStart;
+        child.breakEnd = breakEnd;
         return child;
     }
 

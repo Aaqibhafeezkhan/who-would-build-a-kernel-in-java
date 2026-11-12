@@ -92,6 +92,7 @@ public final class Elf {
             long stack = buildStack(space, argv, envp, entry, phdr, phnum);
             // A page's gap on either side, so running off the end of one doesn't land in another.
             space.setMapRange(((imageEnd + PAGE - 1) & -PAGE) + PAGE, STACK_TOP - STACK_BYTES - PAGE);
+            space.setBreak((imageEnd + PAGE - 1) & -PAGE);
             return new Image(space, entry, stack);
         } catch (RuntimeException | Error e) {
             space.free();

@@ -21,7 +21,9 @@ kernel one more thing". You don't need to know the whole system to help.
 You need JDK 25, `make`, `git`, `qemu-system-x86_64`, x86_64 UEFI firmware, and `node` (the `jsc` tests compare against it).
 
 - macOS: `brew install openjdk qemu` (Homebrew's QEMU includes the firmware).
-- Debian/Ubuntu: `apt install openjdk-25-jdk qemu-system-x86 ovmf`.
+- Debian/Ubuntu: `apt install openjdk-25-jdk qemu-system-x86 ovmf musl-tools`.
+- Off x86-64 Linux, `make user-test` and `make c-test` run their Linux side in Docker, and `c-test`
+  builds its C programs in it too.
 - Anywhere else, or if you'd rather not install anything: open the repo in GitHub Codespaces
   (Code, then Codespaces) or in VS Code's "Reopen in Container". `.devcontainer/` sets up the same
   toolchain CI uses.

@@ -643,6 +643,68 @@ final class UserModeTest {
         assertEquals(0, run(code), "same address");
     }
 
+    static void testBrkGrowsAndShrinks() {
+        long start = 0x800_0000L;
+        long touched = start + 4999;
+        Program p = new Program();
+        p.space.setBreak(start);
+        p.load(new Code().call(SystemCalls.BRK, 0, 0, 0, p.data)
+                .call(SystemCalls.BRK, start + 5000, 0, 0, p.data + 8)
+                .b(0xC6, 0x04, 0x25).imm32(touched).b(7)               // mov byte [touched], 7
+                .b(0x0F, 0xB6, 0x3C, 0x25).imm32(touched)               // movzx edi, byte [touched]
+                .b(0x89, 0x3C, 0x25).imm32(p.data + 16)                 // mov [data + 16], edi
+                .call(SystemCalls.BRK, start + 3 * PAGE, 0, 0, p.data + 24)
+                .call(SystemCalls.BRK, start - 1, 0, 0, p.data + 32)
+                .call(SystemCalls.BRK, MAP_TOP + PAGE, 0, 0, p.data + 40)
+                .mmap(PAGE, READ_WRITE, ANONYMOUS, -1)
+                .call(SystemCalls.BRK, MAP_TOP, 0, 0, p.data + 48)
+                .call(SystemCalls.BRK, start + 100, 0, 0, p.data + 56)
+                .b(0xC6, 0x04, 0x25).imm32(touched).b(8));              // mov byte [touched], 8
+        try {
+            long status = p.run();
+            throw new AssertionError("exited with " + status + " instead of faulting");
+        } catch (UserMode.Fault f) {
+            assertEquals(start, Magic.peekLong(p.kernelView(0)), "brk(0) is the start");
+            assertEquals(start + 5000, Magic.peekLong(p.kernelView(8)), "grown");
+            assertEquals(7, Magic.peekInt(p.kernelView(16)), "written and read back");
+            assertEquals(start + 3 * PAGE, Magic.peekLong(p.kernelView(24)), "grown again");
+            assertEquals(start + 3 * PAGE, Magic.peekLong(p.kernelView(32)), "not below the start");
+            assertEquals(start + 3 * PAGE, Magic.peekLong(p.kernelView(40)), "not past the mmap range");
+            assertEquals(start + 3 * PAGE, Magic.peekLong(p.kernelView(48)), "not into a mapping");
+            assertEquals(start + 100, Magic.peekLong(p.kernelView(56)), "shrunk");
+            assertEquals(PF, f.vector, "page fault");
+            assertEquals(start + PAGE, f.address & -PAGE, "on the page shrinking took away");
+        } finally {
+            p.free();
+        }
+    }
+
+    static void testWritev() {
+        String message = "ring 3: writev\n";
+        Program p = new Program();
+        for (int i = 0; i < message.length(); i++) {
+            Magic.pokeByte(p.kernelView(512 + i), (byte) message.charAt(i));
+        }
+        long[] vectors = {p.data + 512, 8, p.data + 520, 0, p.data + 520, message.length() - 8,
+                Magic.addressOf(p), 8};
+        for (int i = 0; i < vectors.length; i++) {
+            Magic.pokeLong(p.kernelView(256 + 8 * i), vectors[i]);
+        }
+        try {
+            p.load(new Code().call(SystemCalls.WRITEV, 1, p.data + 256, 3, p.data)
+                    .call(SystemCalls.WRITEV, 1, p.data + 256, 4, p.data + 8)
+                    .call(SystemCalls.WRITEV, 1, p.data + 256, -1, p.data + 16)
+                    .call(SystemCalls.WRITEV, 1, p.base, 1, p.data + 24)
+                    .exit(0)).run();
+            assertEquals(message.length(), Magic.peekLong(p.kernelView(0)), "the total of every iovec");
+            assertEquals(-SystemCalls.EFAULT, Magic.peekLong(p.kernelView(8)), "one in kernel memory");
+            assertEquals(-SystemCalls.EINVAL, Magic.peekLong(p.kernelView(16)), "a negative count");
+            assertEquals(-SystemCalls.EFAULT, Magic.peekLong(p.kernelView(24)), "a base in code it can't read");
+        } finally {
+            p.free();
+        }
+    }
+
     static void testMunmapChecksItsArguments() {
         Program p = new Program();
         try {

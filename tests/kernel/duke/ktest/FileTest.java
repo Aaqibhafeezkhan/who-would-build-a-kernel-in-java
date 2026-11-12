@@ -13,6 +13,7 @@ final class FileTest {
     private static final int STRINGS = 512;
     private static final int BUFFER = 1024;
     private static final int STAT = 2048;
+    private static final int IOVECS = 3072;
 
     private final Program p = new Program();
     private final Code code = new Code();
@@ -202,5 +203,39 @@ final class FileTest {
         assertEquals(-SystemCalls.EBADF, t.result(dup2SameClosed), "dup2 closed oldfd onto itself");
         assertEquals(-SystemCalls.EBADF, t.result(dup2NegNew), "dup2 negative newfd");
         assertEquals(-SystemCalls.EBADF, t.result(dup2HighNew), "dup2 out-of-range newfd");
+    }
+
+    /** iovecs at IOVECS as (offset into BUFFER, length) pairs, or an address of its own if the offset's negative. */
+    private long iovecs(int at, long... vectors) {
+        for (int i = 0; i < vectors.length; i += 2) {
+            long base = vectors[i] < 0 ? -vectors[i] : p.data + BUFFER + vectors[i];
+            Magic.pokeLong(p.kernelView(IOVECS + at + 8 * i), base);
+            Magic.pokeLong(p.kernelView(IOVECS + at + 8 * i + 8), vectors[i + 1]);
+        }
+        return p.data + IOVECS + at;
+    }
+
+    // Three buffers across the end of hello.txt's 17 bytes, with an empty one between.
+    static void testReadv() throws InterruptedException {
+        FileTest t = new FileTest();
+        long hello = t.string("/hello.txt");
+        long good = t.iovecs(0, 0, 6, 10, 0, 20, 6, 30, 20);
+        long readOnly = t.iovecs(64, 0, 6, -t.p.base, 6);
+        int open = t.call(SystemCalls.OPEN, hello, 0, 0);
+        int refused = t.call(SystemCalls.READV, 3, readOnly, 2);
+        int read = t.call(SystemCalls.READV, 3, good, 4);
+        int eof = t.call(SystemCalls.READV, 3, good, 4);
+        int negative = t.call(SystemCalls.READV, 3, good, -1);
+        int closed = t.call(SystemCalls.READV, 9, good, 4);
+        t.run();
+        assertEquals(3, t.result(open), "open");
+        assertEquals(-SystemCalls.EFAULT, t.result(refused), "a buffer it can't write");
+        assertEquals(17, t.result(read), "the whole file, from the start");
+        assertEquals("hello ", t.buffer(0, 6), "first buffer");
+        assertEquals("from F", t.buffer(20, 6), "second, past the empty one");
+        assertEquals("AT32\n", t.buffer(30, 5), "third, cut short by the end");
+        assertEquals(0, t.result(eof), "then EOF");
+        assertEquals(-SystemCalls.EINVAL, t.result(negative), "a negative count");
+        assertEquals(-SystemCalls.EBADF, t.result(closed), "a closed descriptor");
     }
 }

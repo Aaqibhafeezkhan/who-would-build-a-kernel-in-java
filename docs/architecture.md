@@ -327,13 +327,20 @@ needs nothing extra, since the children it waits on are in the same group and wa
 The wait status says SIGINT, and the memory goes back as for any exit.
 
 System calls so far: `read` (0), `write` (1), `open` (2), `close` (3), `fstat` (5), `lseek` (8),
-`mmap` (9), `pipe` (22), `dup` (32), `dup2` (33), `nanosleep` (35), `getpid` (39), `clone` (56), `fork` (57), `execve` (59), `exit` (60), `wait4` (61),
+`mmap` (9), `munmap` (11), `brk` (12), `readv` (19), `writev` (20), `pipe` (22), `dup` (32), `dup2` (33), `nanosleep` (35), `getpid` (39), `clone` (56), `fork` (57), `execve` (59), `exit` (60), `wait4` (61),
 `uname` (63), `getcwd` (79), `getppid` (110), `arch_prctl` (158), `gettid` (186), `futex` (202), `clock_gettime` (228), `exit_group` (231),
 `openat` (257) and `pipe2` (293), with Linux's numbers. `SystemCalls.dispatch` is entered from
 the syscall stub without a class-initialization check, so `SystemCalls` keeps no statics that need
 one. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
 the host, put on a FAT disk, and run one after another through the shell in a single boot, with
 the output compared to node's.
+
+C programs linked static against musl run unchanged as well. `make c-test` builds the ones in
+`tests/c` with `gcc -static` in an Alpine container and compares what each prints and its exit
+status on Linux and on Duke. musl's stdio goes through `readv` and `writev`, and its malloc wants
+`brk`: the heap starts at the page after the executable and grows into reservations that page in
+like an `mmap`'s, until it would run into a mapping or the stack. Without `brk`, mallocng would
+fall back to `mmap(PROT_NONE)` and `mprotect`, which Duke doesn't have yet.
 
 Java programs run in ring 3 too. `dukec --user` builds one into a static executable linked at
 0x400000 that runs unchanged on Linux and on Duke. Its `_start` points GS at the CPU block with

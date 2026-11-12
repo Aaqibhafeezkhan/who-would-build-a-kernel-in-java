@@ -25,8 +25,11 @@ public final class SystemCalls {
     public static final int FSTAT = 5;
     public static final int LSEEK = 8;
     public static final int MMAP = 9;
+    public static final int READV = 19;
+    public static final int WRITEV = 20;
     public static final int PIPE = 22;
     public static final int MUNMAP = 11;
+    public static final int BRK = 12;
     public static final int DUP = 32;
     public static final int DUP2 = 33;
     public static final int GETPID = 39;
@@ -89,6 +92,7 @@ public final class SystemCalls {
     private static final int PATH_MAX = 4096;
     /** More argv or envp entries than this get E2BIG; they'd never fit the stack's top page anyway. */
     private static final int MAX_ARGS = 1024;
+    private static final int IOV_MAX = 1024;
     /** Where the syscall stub saved the user's rsp, after the registers. */
     private static final int USER_RSP = 120;
     public static final int ARCH_SET_GS = 0x1001;
@@ -138,6 +142,8 @@ public final class SystemCalls {
             result = read(a0, a1, a2);
         } else if (number == WRITE) {
             result = write(a0, a1, a2);
+        } else if (number == READV || number == WRITEV) {
+            result = vector(a0, a1, a2, number == READV);
         } else if (number == OPEN) {
             result = open(AT_FDCWD, a0, a1);
         } else if (number == OPENAT) {
@@ -160,6 +166,8 @@ public final class SystemCalls {
                     Frame.register(frame, Frame.R10), Frame.register(frame, Frame.R8), Frame.register(frame, Frame.R9));
         } else if (number == MUNMAP) {
             result = munmap(a0, a1);
+        } else if (number == BRK) {
+            result = Scheduler.addressSpace().setBreakEnd(a0);
         } else if (number == GETPID || number == GETPPID) {
             Process self = Process.current();
             result = self == null ? -ESRCH : number == GETPID ? self.pid : self.parentPid();
@@ -478,6 +486,53 @@ public final class SystemCalls {
             return -EFAULT;
         }
         return file.write(buffer, count);
+    }
+
+    /**
+     * readv and writev: each {@code struct iovec { void *base; size_t len; }} in turn, all checked
+     * before any is used, stopping after one that comes up short. Empty ones are skipped: musl's
+     * stdio passes one, and a read of 0 from the console or a pipe would wait for nothing.
+     */
+    private static long vector(long fd, long iov, long count, boolean reads) {
+        OpenFile file = files().get(fd);
+        if (file == null) {
+            return -EBADF;
+        }
+        if (count < 0 || count > IOV_MAX) {
+            return -EINVAL;
+        }
+        long[] vectors = userReadable(iov, 16 * count) ? getLongs(iov, 2 * (int) count) : null;
+        if (vectors == null) {
+            return -EFAULT;
+        }
+        long total = 0;
+        for (int i = 0; i < count; i++) {
+            long base = vectors[2 * i];
+            long length = vectors[2 * i + 1];
+            if (length < 0 || length > Long.MAX_VALUE - total) {
+                return -EINVAL;
+            }
+            total += length;
+            if (!(reads ? userWritable(base, length) : userReadable(base, length))) {
+                return -EFAULT;
+            }
+        }
+        long done = 0;
+        for (int i = 0; i < count; i++) {
+            long length = vectors[2 * i + 1];
+            if (length == 0) {
+                continue;
+            }
+            long n = reads ? file.read(vectors[2 * i], length) : file.write(vectors[2 * i], length);
+            if (n < 0) {
+                return done > 0 ? done : n;
+            }
+            done += n;
+            if (n < length) {
+                break;
+            }
+        }
+        return done;
     }
 
     /**
