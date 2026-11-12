@@ -212,6 +212,63 @@ public final class String implements Comparable<String> {
         return new String(joined);
     }
 
+    public String toUpperCase() {
+        byte[] upper = new byte[value.length];
+        for (int i = 0; i < value.length; i++) {
+            char c = (char) (value[i] & 0xFF);
+            char mapped = Character.toUpperCase(c);
+            // The JDK maps these two characters outside Latin-1, which this String cannot store.
+            upper[i] = (byte) (mapped <= 0xFF ? mapped : c);
+        }
+        return new String(upper);
+    }
+
+    public String toLowerCase() {
+        byte[] lower = new byte[value.length];
+        for (int i = 0; i < value.length; i++) {
+            lower[i] = (byte) Character.toLowerCase((char) (value[i] & 0xFF));
+        }
+        return new String(lower);
+    }
+
+    public String repeat(int count) {
+        if (count < 0) {
+            throw new IllegalArgumentException("count is negative: " + count);
+        }
+        if (count == 0) {
+            return "";
+        }
+        if (count == 1 || value.length == 0) {
+            return this;
+        }
+        if (count > Integer.MAX_VALUE / value.length) {
+            throw new OutOfMemoryError("Required length exceeds implementation limit");
+        }
+        byte[] repeated = new byte[value.length * count];
+        for (int i = 0; i < repeated.length; i++) {
+            repeated[i] = value[i % value.length];
+        }
+        return new String(repeated);
+    }
+
+    public String replace(char oldChar, char newChar) {
+        byte[] replaced = new byte[value.length];
+        boolean changed = false;
+        for (int i = 0; i < value.length; i++) {
+            char c = (char) (value[i] & 0xFF);
+            if (c == oldChar) {
+                if (newChar > 0xFF) {
+                    throw new IllegalArgumentException(
+                            "non-Latin-1 char " + (int) newChar + " (Strings are Latin-1 only for now)");
+                }
+                replaced[i] = (byte) newChar;
+                changed |= oldChar != newChar;
+            } else {
+                replaced[i] = value[i];
+            }
+        }
+        return changed ? new String(replaced) : this;
+    }
 
     public boolean isBlank() {
         for (int i = 0; i < value.length; i++) {
