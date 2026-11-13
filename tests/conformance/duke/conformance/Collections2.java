@@ -13,6 +13,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
 
@@ -249,6 +250,90 @@ final class Collections2 {
         return Arrays.toString(grown) + " " + Arrays.toString(moreNames) + " " + moreNames.getClass().getSimpleName()
             + " " + Arrays.equals(filled, new int[] {7, 7, 7, 7}) + " " + Arrays.hashCode(filled)
             + " " + Arrays.toString(Arrays.copyOfRange(grown, 2, 5));
+    }
+
+    static String objectsOddsAndEnds() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(Objects.hash("x", 1, null)).append(' ').append(Objects.hash()).append(' ')
+            .append(Objects.hash((Object[]) null)).append(' ')
+            .append(Objects.requireNonNullElse("present", "fallback")).append(' ')
+            .append(Objects.requireNonNullElse("present", null)).append(' ')
+            .append(Objects.requireNonNullElse(null, "fallback")).append(' ')
+            .append(Objects.requireNonNullElseGet("present", null)).append(' ');
+
+        int[] calls = {0};
+        String supplied = Objects.requireNonNullElseGet("present", () -> {
+            calls[0]++;
+            return "unused";
+        });
+        sb.append(supplied).append(':').append(calls[0]).append(' ');
+        supplied = Objects.requireNonNullElseGet(null, () -> {
+            calls[0]++;
+            return "supplied";
+        });
+        sb.append(supplied).append(':').append(calls[0]);
+        return sb.toString();
+    }
+
+    static String objectsNullDefaults() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            Objects.requireNonNullElse(null, null);
+            sb.append("none");
+        } catch (NullPointerException e) {
+            sb.append(e.getClass().getName()).append(':').append(e.getMessage());
+        }
+        try {
+            Objects.requireNonNullElseGet(null, null);
+        } catch (NullPointerException e) {
+            sb.append(' ').append(e.getClass().getName()).append(':').append(e.getMessage());
+        }
+        try {
+            Objects.requireNonNullElseGet(null, () -> null);
+        } catch (NullPointerException e) {
+            sb.append(' ').append(e.getClass().getName()).append(':').append(e.getMessage());
+        }
+        return sb.toString();
+    }
+
+    static String rangedArrayFill() {
+        int[] ints = {1, 2, 3, 4};
+        long[] longs = {5, 6, 7, 8};
+        Arrays.fill(ints, 1, 3, 9);
+        Arrays.fill(longs, 0, 2, 10L);
+        Arrays.fill(longs, longs.length, longs.length, 11L);
+        return Arrays.toString(ints) + " " + Arrays.toString(longs);
+    }
+
+    static String rangedArrayFillBadRanges() {
+        return rangeFailure(new int[3], -1, 1) + ";"
+            + rangeFailure(new int[3], 1, 4) + ";"
+            + rangeFailure(new int[3], 2, 1) + ";"
+            + rangeFailure(new long[3], -1, 1) + ";"
+            + rangeFailure(new long[3], 1, 4) + ";"
+            + rangeFailure(new long[3], 2, 1);
+    }
+
+    private static String rangeFailure(int[] array, int fromIndex, int toIndex) {
+        try {
+            Arrays.fill(array, fromIndex, toIndex, 0);
+            return "none";
+        } catch (IndexOutOfBoundsException e) {
+            return e.getClass().getName() + ":" + e.getMessage();
+        } catch (IllegalArgumentException e) {
+            return e.getClass().getName() + ":" + e.getMessage();
+        }
+    }
+
+    private static String rangeFailure(long[] array, int fromIndex, int toIndex) {
+        try {
+            Arrays.fill(array, fromIndex, toIndex, 0L);
+            return "none";
+        } catch (IndexOutOfBoundsException e) {
+            return e.getClass().getName() + ":" + e.getMessage();
+        } catch (IllegalArgumentException e) {
+            return e.getClass().getName() + ":" + e.getMessage();
+        }
     }
 
     static String unmodifiableAndAsList() {

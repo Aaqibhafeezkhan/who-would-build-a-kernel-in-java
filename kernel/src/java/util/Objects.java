@@ -1,5 +1,7 @@
 package java.util;
 
+import java.util.function.Supplier;
+
 /** javac calls requireNonNull for bound method references, so this exists before the rest of java.util. */
 public final class Objects {
 
@@ -34,6 +36,18 @@ public final class Objects {
 
     public static int hashCode(Object o) {
         return o == null ? 0 : o.hashCode();
+    }
+
+    public static int hash(Object... values) {
+        return Arrays.hashCode(values);
+    }
+
+    public static <T> T requireNonNullElse(T object, T defaultObject) {
+        return object != null ? object : requireNonNull(defaultObject, "defaultObj");
+    }
+
+    public static <T> T requireNonNullElseGet(T object, Supplier<? extends T> supplier) {
+        return object != null ? object : requireNonNull(requireNonNull(supplier, "supplier").get(), "supplier.get()");
     }
 
     public static boolean isNull(Object o) {

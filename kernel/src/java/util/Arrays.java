@@ -17,9 +17,35 @@ public final class Arrays {
         }
     }
 
+    public static void fill(int[] a, int fromIndex, int toIndex, int value) {
+        rangeCheck(fromIndex, toIndex, a.length);
+        for (int i = fromIndex; i < toIndex; i++) {
+            a[i] = value;
+        }
+    }
+
     public static void fill(long[] a, long value) {
         for (int i = 0; i < a.length; i++) {
             a[i] = value;
+        }
+    }
+
+    public static void fill(long[] a, int fromIndex, int toIndex, long value) {
+        rangeCheck(fromIndex, toIndex, a.length);
+        for (int i = fromIndex; i < toIndex; i++) {
+            a[i] = value;
+        }
+    }
+
+    private static void rangeCheck(int fromIndex, int toIndex, int length) {
+        if (fromIndex > toIndex) {
+            throw new IllegalArgumentException("fromIndex(" + fromIndex + ") > toIndex(" + toIndex + ")");
+        }
+        if (fromIndex < 0) {
+            throw new ArrayIndexOutOfBoundsException("Array index out of range: " + fromIndex);
+        }
+        if (toIndex > length) {
+            throw new ArrayIndexOutOfBoundsException("Array index out of range: " + toIndex);
         }
     }
 
