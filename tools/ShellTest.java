@@ -116,6 +116,8 @@ public class ShellTest {
             }, "you said: typed at duke");
             failures += check("a pipeline", () -> type(serial, "run /bin/cat hello.txt | /bin/echoline\n"),
                     "you said: hello from FAT32");
+            failures += check("a quoted pipe is an argument", () -> type(serial, "run /bin/cat \"|\"\n"),
+                    "/bin/cat: exit status 1");
             failures += check("a pipeline needs a program on each side", () -> type(serial, "run /bin/hello |\n"),
                     "usage: run <path> [args] [| <path> [args]]...");
             failures += check("ctrl-c ends every program in a pipeline", () -> {

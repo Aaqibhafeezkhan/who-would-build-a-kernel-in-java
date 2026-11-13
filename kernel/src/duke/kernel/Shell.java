@@ -117,7 +117,8 @@ public final class Shell {
     }
 
     static void execute(String line) {
-        List<String> words = split(line);
+        List<Boolean> quotedWords = new ArrayList<>();
+        List<String> words = split(line, quotedWords);
         if (words.isEmpty()) {
             return;
         }
@@ -168,7 +169,7 @@ public final class Shell {
                 }
             }
             case "run" -> {
-                List<String[]> stages = pipeline(words);
+                List<String[]> stages = pipeline(words, quotedWords);
                 if (stages == null) {
                     Console.println("usage: run <path> [args] [| <path> [args]]...");
                 } else {
@@ -203,11 +204,11 @@ public final class Shell {
     }
 
     /** The argv of each program in {@code run a | b}, or null if one of them is missing. */
-    private static List<String[]> pipeline(List<String> words) {
+    private static List<String[]> pipeline(List<String> words, List<Boolean> quotedWords) {
         List<String[]> stages = new ArrayList<>();
         int from = 1;
         for (int i = 1; i <= words.size(); i++) {
-            if (i < words.size() && !words.get(i).equals("|")) {
+            if (i < words.size() && (!words.get(i).equals("|") || quotedWords.get(i))) {
                 continue;
             }
             if (i == from) {
@@ -363,10 +364,11 @@ public final class Shell {
     }
 
     /** Words split on spaces, except inside double quotes, which make one word without the quotes. */
-    private static List<String> split(String line) {
+    private static List<String> split(String line, List<Boolean> quotedWords) {
         List<String> words = new ArrayList<>();
         StringBuilder word = null;
         boolean quoted = false;
+        boolean wordWasQuoted = false;
         for (int i = 0; i < line.length(); i++) {
             char c = line.charAt(i);
             if (c == '"') {
@@ -377,17 +379,23 @@ public final class Shell {
             } else if (c == ' ' && !quoted) {
                 if (word != null) {
                     words.add(word.toString());
+                    quotedWords.add(wordWasQuoted);
                     word = null;
+                    wordWasQuoted = false;
                 }
             } else {
                 if (word == null) {
                     word = new StringBuilder();
+                }
+                if (quoted) {
+                    wordWasQuoted = true;
                 }
                 word.append(c);
             }
         }
         if (word != null) {
             words.add(word.toString());
+            quotedWords.add(wordWasQuoted);
         }
         return words;
     }
