@@ -16,7 +16,8 @@ import java.util.regex.Pattern;
 /**
  * Where a test boot was when it hung or died: each CPU's RIP as the Java method it's in, from
  * kernel.map. A boot that's still running is sampled a few times through the QEMU monitor, so a
- * slow kernel (the methods change) can be told from a stuck one (they don't). One that already
+ * slow kernel (the methods change) can be told from a stuck one (they don't), and a stuck CPU's
+ * callers are read off its frame pointers, since the method alone is often a lock. One that already
  * exited can't be asked; under -no-reboot QEMU logs a triple fault without the registers, and
  * -d int would have them but logs every timer interrupt too, so it says only what QEMU said.
  *
@@ -28,6 +29,9 @@ final class Postmortem {
     static final int SAMPLES = 3;
     static final Pattern CPU = Pattern.compile("CPU#(\\d+)");
     static final Pattern RIP = Pattern.compile("RIP=([0-9a-f]{16})");
+    static final Pattern RBP = Pattern.compile("RBP=([0-9a-f]{16})");
+    static final Pattern WORDS = Pattern.compile(":\\s+0x([0-9a-f]{16})\\s+0x([0-9a-f]{16})");
+    static final int CALLERS = 12;
 
     final Path monitor;
     final Path map;
@@ -74,6 +78,19 @@ final class Postmortem {
                 }
                 places.forEach((cpu, where) -> out.append("  CPU ").append(cpu).append(": ")
                         .append(String.join(" | ", where)).append('\n'));
+                String last = sample();
+                if (last != null) {
+                    Map<Integer, Long> rbps = registers(last, RBP);
+                    for (Map.Entry<Integer, Long> e : registers(last, RIP).entrySet()) {
+                        List<Long> callers = callers(e.getKey(), rbps.getOrDefault(e.getKey(), 0L), symbols);
+                        if (!callers.isEmpty()) {
+                            out.append("  CPU ").append(e.getKey()).append(" called from:\n");
+                            for (long at : callers) {
+                                out.append("    ").append(symbols.describe(at)).append('\n');
+                            }
+                        }
+                    }
+                }
             } else if (Files.exists(qemuLog) && Files.readString(qemuLog).contains("Triple fault")) {
                 out.append("postmortem: QEMU exited on a triple fault (rerun with -d int to see the exceptions before it)\n");
             } else {
@@ -106,23 +123,79 @@ final class Postmortem {
         }
     }
 
+    /**
+     * The return addresses up {@code cpu}'s chain of saved frame pointers, read through the monitor,
+     * while they're in kernel code: the compiler keeps RBP as a frame pointer, as Backtrace relies on.
+     */
+    List<Long> callers(int cpu, long rbp, Symbols symbols) {
+        List<Long> callers = new ArrayList<>();
+        try (SocketChannel channel = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+            channel.connect(UnixDomainSocketAddress.of(monitor));
+            command(channel, "");
+            command(channel, "cpu " + cpu);
+            for (int i = 0; i < CALLERS && rbp != 0 && (rbp & 7) == 0; i++) {
+                Matcher m = WORDS.matcher(command(channel, "x /2gx 0x" + Long.toHexString(rbp)));
+                if (!m.find()) {
+                    break;
+                }
+                long ret = Long.parseUnsignedLong(m.group(2), 16);
+                if (Long.compareUnsigned(ret, symbols.textStart()) < 0 || Long.compareUnsigned(ret, symbols.textEnd()) >= 0) {
+                    break;
+                }
+                callers.add(ret);
+                rbp = Long.parseUnsignedLong(m.group(1), 16);
+            }
+        } catch (Exception e) {
+            // A partial chain is still worth printing.
+        }
+        return callers;
+    }
+
+    // Sends one monitor command and reads up to the next prompt.
+    private static String command(SocketChannel channel, String line) throws Exception {
+        if (!line.isEmpty()) {
+            channel.write(ByteBuffer.wrap((line + "\n").getBytes(StandardCharsets.US_ASCII)));
+        }
+        StringBuilder answer = new StringBuilder();
+        ByteBuffer buffer = ByteBuffer.allocate(1 << 12);
+        channel.configureBlocking(false);
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        while (!answer.toString().endsWith("(qemu) ") && System.nanoTime() < deadline) {
+            int n = channel.read(buffer);
+            if (n < 0) {
+                break;
+            }
+            answer.append(new String(buffer.array(), 0, n, StandardCharsets.US_ASCII));
+            buffer.clear();
+            if (n == 0) {
+                Thread.sleep(10);
+            }
+        }
+        return answer.toString();
+    }
+
     /** Each CPU's RIP in {@code info registers -a}. */
     static Map<Integer, Long> rips(String text) {
-        Map<Integer, Long> rips = new TreeMap<>();
+        return registers(text, RIP);
+    }
+
+    /** Each CPU's value of one register in {@code info registers -a}. */
+    static Map<Integer, Long> registers(String text, Pattern register) {
+        Map<Integer, Long> values = new TreeMap<>();
         Matcher h = CPU.matcher(text);
         if (!h.find()) {
-            return rips;
+            return values;
         }
         while (true) {
             int cpu = Integer.parseInt(h.group(1));
             int start = h.end();
             boolean more = h.find();
-            Matcher r = RIP.matcher(text).region(start, more ? h.start() : text.length());
+            Matcher r = register.matcher(text).region(start, more ? h.start() : text.length());
             if (r.find()) {
-                rips.put(cpu, Long.parseUnsignedLong(r.group(1), 16));
+                values.put(cpu, Long.parseUnsignedLong(r.group(1), 16));
             }
             if (!more) {
-                return rips;
+                return values;
             }
         }
     }
