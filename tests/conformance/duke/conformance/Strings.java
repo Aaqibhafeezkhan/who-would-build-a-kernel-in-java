@@ -1,5 +1,9 @@
 package duke.conformance;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.StringJoiner;
+
 final class Strings {
 
     static int length() {
@@ -128,5 +132,63 @@ final class Strings {
                 + "ababa".startsWith("ba", -1) + " " + "ababa".startsWith("ba", 5) + " "
                 + "ababa".startsWith("", 5) + " " + "ababa".startsWith("", 8) + " "
                 + "ababa".startsWith("", -1);
+    }
+
+    static String joinArray() {
+        String[] parts = {"a", "b", "c"};
+        return String.join("-", parts);
+    }
+
+    static String joinVarargs() {
+        return String.join(", ", "one", "two", "three");
+    }
+
+    static String joinIterable() {
+        List<String> list = new ArrayList<>();
+        list.add("x");
+        list.add("y");
+        list.add("z");
+        return String.join("/", list);
+    }
+
+    static String joinEmptyList() {
+        List<String> list = new ArrayList<>();
+        return "[" + String.join(",", list) + "]";
+    }
+
+    static String joinWithNull() {
+        List<String> list = new ArrayList<>();
+        list.add("a");
+        list.add(null);
+        list.add("b");
+        return String.join(",", list);
+    }
+
+    static String stringJoinerBasics() {
+        StringJoiner sj = new StringJoiner(", ");
+        sj.add("red");
+        sj.add("green");
+        sj.add("blue");
+        return sj.toString() + " len=" + sj.length();
+    }
+
+    static String stringJoinerFixtures() {
+        StringJoiner sj = new StringJoiner(", ", "[", "]");
+        sj.add("1");
+        sj.add("2");
+        return sj.toString() + " len=" + sj.length();
+    }
+
+    static String stringJoinerEmpty() {
+        StringJoiner sj = new StringJoiner(",", "{", "}");
+        return sj.toString() + " len=" + sj.length();
+    }
+
+    static String stringJoinerEmptyValue() {
+        StringJoiner sj = new StringJoiner(", ", "[", "]");
+        sj.setEmptyValue("<empty>");
+        String before = sj.toString() + " len=" + sj.length();
+        sj.add("only");
+        return before + " " + sj.toString() + " len=" + sj.length();
     }
 }

@@ -1,5 +1,7 @@
 package java.lang;
 
+import java.util.StringJoiner;
+
 /**
  * Latin-1 only for now. Literals are laid out by the compiler, so {@code value} being the only
  * reference field is part of its contract with this class.
@@ -375,5 +377,23 @@ public final class String implements Comparable<String> {
 
     public static String valueOf(char c) {
         return new String(new byte[] {(byte) c});
+    }
+
+    // The JDK takes CharSequence here; Duke has only String, so these do too. A null element joins
+    // as "null", the way StringBuilder.append renders it.
+    public static String join(String delimiter, String... elements) {
+        StringJoiner joiner = new StringJoiner(delimiter);
+        for (String element : elements) {
+            joiner.add(element);
+        }
+        return joiner.toString();
+    }
+
+    public static String join(String delimiter, Iterable<? extends String> elements) {
+        StringJoiner joiner = new StringJoiner(delimiter);
+        for (String element : elements) {
+            joiner.add(element);
+        }
+        return joiner.toString();
     }
 }
