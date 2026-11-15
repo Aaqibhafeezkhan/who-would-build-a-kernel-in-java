@@ -47,7 +47,8 @@ public class ShellTest {
         FatImage.writeSample(fat32);
         List<String> command = new ArrayList<>(List.of("tools/qemu.sh", ESP.toString(), "-serial", "stdio",
                 "-drive", "if=none,id=fat32,format=raw,snapshot=on,file=" + fat32,
-                "-device", "virtio-blk-pci,drive=fat32"));
+                "-device", "virtio-blk-pci,drive=fat32",
+                "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0"));
         command.addAll(postmortem.qemuArguments());
         Process qemu = new ProcessBuilder(command)
                 .directory(Harness.ROOT.toFile())
@@ -120,6 +121,10 @@ public class ShellTest {
                     "you said: hello from FAT32");
             failures += check("a quoted pipe is an argument", () -> type(serial, "run /bin/cat \"|\"\n"),
                     "/bin/cat: exit status 1");
+            failures += check("ping the gateway", () -> type(serial, "ping 10.0.2.2\n"), "3 sent, 3 received");
+            failures += check("ping an address nobody has", () -> type(serial, "ping 10.0.2.99\n"),
+                    "ping: 10.0.2.99: no ARP reply from 10.0.2.99");
+            failures += check("ping needs an address", () -> type(serial, "ping 10.0.2\n"), "usage: ping <a.b.c.d>");
             failures += check("a pipeline needs a program on each side", () -> type(serial, "run /bin/hello |\n"),
                     "usage: run <path> [args] [| <path> [args]]...");
             failures += check("ctrl-c ends every program in a pipeline", () -> {

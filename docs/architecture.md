@@ -139,6 +139,14 @@ suppressed. Heap arrays aren't physically contiguous, so sectors pass through a 
 time. `make ktest` attaches a 64-sector disk with a known pattern behind a PCIe root port, which also
 gives the PCI scan a bridge to follow.
 
+The same transport drives a virtio-net device: a receive queue kept full of 2 KiB buffers and a
+transmit queue that sends one frame at a time, both polled. `duke.kernel.net` sits on top with
+Ethernet, ARP, IPv4 (no options or fragments) and ICMP echo, at the fixed address 10.0.2.15/24
+behind 10.0.2.2, which is what QEMU's user-mode network would hand out by DHCP. A `net` kernel
+thread drains the receive queue every tick, and the shell's `ping` polls as well while it waits so
+its round trip isn't rounded up to the tick. QEMU answers echo for 10.0.2.2 itself, so `make
+shell-test` pings it with no root or tap device.
+
 `duke.kernel.fs.Fat` reads FAT32 and FAT16 volumes, on a whole disk or in the first FAT partition
 of an MBR, and the boot mounts the first one it finds for the shell's `ls` and `cat`. It follows
 cluster chains through the FAT and reads long names, checking each against its short name's

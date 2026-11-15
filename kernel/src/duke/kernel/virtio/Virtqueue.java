@@ -6,7 +6,8 @@ import duke.rt.Magic;
 
 /**
  * A split virtqueue in one frame: descriptor table, then the available ring, then the used ring.
- * One request in flight at a time, polled: the device is told not to interrupt.
+ * Polled: the device is told not to interrupt. {@link #run} keeps one request in flight and waits
+ * for it; {@link #post} and {@link #poll} keep several, for buffers the device fills when it likes.
  */
 final class Virtqueue {
 
@@ -56,13 +57,37 @@ final class Virtqueue {
         Magic.pokeShort(d + 14, (short) next);
     }
 
-    /** Hands the chain starting at {@code head} to the device and waits for it to come back. */
-    void run(int head) {
+    int size() {
+        return size;
+    }
+
+    /** Hands the chain starting at {@code head} to the device without waiting for it. */
+    void post(int head) {
         Magic.pokeShort(base + AVAILABLE + 4 + 2L * (nextAvailable % size), (short) head);
         // x86 keeps stores in order, so the device sees the ring entry before the index that publishes it.
         nextAvailable = (nextAvailable + 1) & 0xFFFF;
         Magic.pokeShort(base + AVAILABLE + 2, (short) nextAvailable);
+    }
+
+    void notifyDevice() {
         Magic.pokeShort(doorbell, (short) index);
+    }
+
+    /** The next chain the device has finished with, as its head index << 32 | bytes written, or -1. */
+    long poll() {
+        if ((Magic.peekShort(base + USED + 2) & 0xFFFF) == lastUsed) {
+            return -1;
+        }
+        long entry = base + USED + 4 + 8L * (lastUsed % size);
+        long used = (long) Magic.peekInt(entry) << 32 | Magic.peekInt(entry + 4) & 0xFFFF_FFFFL;
+        lastUsed = (lastUsed + 1) & 0xFFFF;
+        return used;
+    }
+
+    /** Hands the chain starting at {@code head} to the device and waits for it to come back. */
+    void run(int head) {
+        post(head);
+        notifyDevice();
         long deadline = HpetClock.nanos() + TIMEOUT_NANOS;
         while ((Magic.peekShort(base + USED + 2) & 0xFFFF) == lastUsed) {
             if (HpetClock.nanos() > deadline) {

@@ -4,6 +4,9 @@ import duke.boot.Limine;
 import duke.kernel.acpi.Madt;
 import duke.kernel.fs.Fat;
 import duke.kernel.mm.PhysicalMemory;
+import duke.kernel.net.Icmp;
+import duke.kernel.net.Ipv4;
+import duke.kernel.net.Network;
 import duke.kernel.pci.Pci;
 import duke.kernel.time.Timer;
 import duke.kernel.user.Elf;
@@ -125,7 +128,7 @@ public final class Shell {
         }
         switch (words.get(0)) {
             case "help" -> {
-                Console.println("commands: help, uptime, mem, regions, gc, cpus, threads, pci, ls [path], cat <path>, hexdump <path>, run <path> [args] [| <path> [args]], echo <text>, clear, panic");
+                Console.println("commands: help, uptime, mem, regions, gc, cpus, threads, pci, ls [path], cat <path>, hexdump <path>, run <path> [args] [| <path> [args]], ping <address>, echo <text>, clear, panic");
                 if (!Commands.names().isEmpty()) {
                     StringBuilder more = new StringBuilder("also:");
                     for (int i = 0; i < Commands.names().size(); i++) {
@@ -176,6 +179,16 @@ public final class Shell {
                     Console.println("usage: run <path> [args] [| <path> [args]]...");
                 } else {
                     run(stages);
+                }
+            }
+            case "ping" -> {
+                Integer address = words.size() == 2 ? Ipv4.parse(words.get(1)) : null;
+                if (address == null) {
+                    Console.println("usage: ping <a.b.c.d>");
+                } else if (!Network.up()) {
+                    Console.println("ping: no network device");
+                } else {
+                    Icmp.ping(address, 3);
                 }
             }
             case "echo" -> Console.println(line.substring(4).strip());

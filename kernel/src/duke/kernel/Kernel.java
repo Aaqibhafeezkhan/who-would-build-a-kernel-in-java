@@ -9,6 +9,7 @@ import duke.kernel.mm.KernelAddressSpace;
 import duke.kernel.mm.KernelHeap;
 import duke.kernel.mm.PhysicalMemory;
 import duke.kernel.mm.Tlb;
+import duke.kernel.net.Network;
 import duke.kernel.pci.Pci;
 import duke.kernel.time.Timer;
 import duke.kernel.user.UserMode;
@@ -55,6 +56,7 @@ public final class Kernel {
         // Disk requests time out against the HPET clock, and the disk lock is a monitor.
         VirtioBlock.init();
         Fat.init();
+        Network.init();
         // Not before: the boot CPU's old GDT and page tables, and the other CPUs while Limine had
         // them parked, all lived in this memory. A CPU that never checked in might still be there.
         if (Smp.start()) {
