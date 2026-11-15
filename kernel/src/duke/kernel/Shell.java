@@ -187,6 +187,8 @@ public final class Shell {
                     Console.println("usage: ping <a.b.c.d>");
                 } else if (!Network.up()) {
                     Console.println("ping: no network device");
+                } else if (Network.address() == 0) {
+                    Console.println("ping: no address yet");
                 } else {
                     Icmp.ping(address, 3);
                 }

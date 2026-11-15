@@ -52,7 +52,7 @@ public final class Icmp {
         long nextHop = Ipv4.nextHop(destination);
         if (nextHop < 0) {
             Console.println("ping: " + name + ": no ARP reply from "
-                    + Ipv4.format(Network.onLink(destination) ? destination : Network.GATEWAY));
+                    + Ipv4.format(Network.onLink(destination) ? destination : Network.gateway()));
             return;
         }
         int received = 0;

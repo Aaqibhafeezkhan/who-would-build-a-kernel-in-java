@@ -45,6 +45,10 @@ public class KernelTests {
         FatImage.writeSampleDirectory(fat16);
         // The disk sits behind a PCIe root port, so the PCI scan has a bridge to follow.
         Postmortem postmortem = Postmortem.in(OUT, OUT.resolve("kernel.map"));
+        int loopbackPort;
+        try (java.net.DatagramSocket probe = new java.net.DatagramSocket(0, java.net.InetAddress.getLoopbackAddress())) {
+            loopbackPort = probe.getLocalPort();
+        }
         List<String> command = new ArrayList<>(List.of("tools/qemu.sh", esp.toString(), "-serial", "file:" + serial,
                 "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
                 "-device", "pcie-root-port,id=rp0,chassis=1",
@@ -53,7 +57,12 @@ public class KernelTests {
                 "-drive", "if=none,id=fat32,format=raw,file=" + fat32,
                 "-device", "virtio-blk-pci,drive=fat32",
                 "-drive", "if=none,id=fat16,format=raw,snapshot=on,file=fat:16:" + fat16,
-                "-device", "virtio-blk-pci,drive=fat16"));
+                "-device", "virtio-blk-pci,drive=fat16",
+                // Frames go out as UDP to a port that sends them straight back, so nobody answers
+                // DHCP. A hub with nothing else on it would do that too, but never finishes a send.
+                "-netdev", "dgram,id=net0,local.type=inet,local.host=127.0.0.1,local.port=" + loopbackPort
+                        + ",remote.type=inet,remote.host=127.0.0.1,remote.port=" + loopbackPort,
+                "-device", "virtio-net-pci,netdev=net0"));
         command.addAll(postmortem.qemuArguments());
         Process qemu = new ProcessBuilder(command)
                 .directory(Harness.ROOT.toFile())

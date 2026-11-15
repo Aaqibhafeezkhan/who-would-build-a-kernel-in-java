@@ -110,6 +110,7 @@ public final class Kernel {
         Timer.sleep(100);
         Console.println("timer: local APIC timer at " + Timer.apicFrequency() / 1000 + " kHz (calibrated against the HPET), "
                 + Timer.HZ + " Hz tick; slept 100 ms, uptime advanced " + (Timer.uptimeMillis() - before) + " ms");
+        Network.printConfiguration();
         Console.println("DUKE-BOOT-OK");
         Startup.runAll();
         Shell.run();

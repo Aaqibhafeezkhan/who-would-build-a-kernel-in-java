@@ -35,7 +35,11 @@ final class Wire {
 
     /** RFC 1071: the ones' complement of the ones' complement sum of 16-bit words. */
     static int checksum(byte[] b, int at, int length) {
-        long sum = 0;
+        return checksum(b, at, length, 0);
+    }
+
+    /** The same, with {@code sum} already added in, as for a pseudo-header. */
+    static int checksum(byte[] b, int at, int length, long sum) {
         for (int i = 0; i + 1 < length; i += 2) {
             sum += get16(b, at + i);
         }

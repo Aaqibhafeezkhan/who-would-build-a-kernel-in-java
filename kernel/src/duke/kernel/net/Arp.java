@@ -25,7 +25,7 @@ final class Arp {
         long senderMac = Wire.get48(frame, at + 8);
         int sender = Wire.get32(frame, at + 14);
         int target = Wire.get32(frame, at + 24);
-        if (target != Network.ADDRESS) {
+        if (target != Network.address() || target == 0) {
             return;
         }
         synchronized (cache) {
@@ -72,7 +72,7 @@ final class Arp {
         frame[at + 5] = 4;
         Wire.put16(frame, at + 6, operation);
         Wire.put48(frame, at + 8, Network.mac());
-        Wire.put32(frame, at + 14, Network.ADDRESS);
+        Wire.put32(frame, at + 14, Network.address());
         Wire.put48(frame, at + 18, operation == REPLY ? targetMac : 0);
         Wire.put32(frame, at + 24, target);
         return frame;

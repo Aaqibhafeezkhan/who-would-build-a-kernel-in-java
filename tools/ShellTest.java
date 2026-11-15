@@ -48,7 +48,8 @@ public class ShellTest {
         List<String> command = new ArrayList<>(List.of("tools/qemu.sh", ESP.toString(), "-serial", "stdio",
                 "-drive", "if=none,id=fat32,format=raw,snapshot=on,file=" + fat32,
                 "-device", "virtio-blk-pci,drive=fat32",
-                "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0"));
+                // Not QEMU's default 10.0.2.0/24, so only an address from DHCP reaches the gateway.
+                "-netdev", "user,id=net0,net=10.0.3.0/24", "-device", "virtio-net-pci,netdev=net0"));
         command.addAll(postmortem.qemuArguments());
         Process qemu = new ProcessBuilder(command)
                 .directory(Harness.ROOT.toFile())
@@ -121,9 +122,11 @@ public class ShellTest {
                     "you said: hello from FAT32");
             failures += check("a quoted pipe is an argument", () -> type(serial, "run /bin/cat \"|\"\n"),
                     "/bin/cat: exit status 1");
-            failures += check("ping the gateway", () -> type(serial, "ping 10.0.2.2\n"), "3 sent, 3 received");
-            failures += check("ping an address nobody has", () -> type(serial, "ping 10.0.2.99\n"),
-                    "ping: 10.0.2.99: no ARP reply from 10.0.2.99");
+            failures += booted("an address from DHCP",
+                    "net: virtio-net 52:54:00:12:34:56, 10.0.3.15/24 via 10.0.3.2 from DHCP server 10.0.3.2");
+            failures += check("ping the gateway", () -> type(serial, "ping 10.0.3.2\n"), "3 sent, 3 received");
+            failures += check("ping an address nobody has", () -> type(serial, "ping 10.0.3.99\n"),
+                    "ping: 10.0.3.99: no ARP reply from 10.0.3.99");
             failures += check("ping needs an address", () -> type(serial, "ping 10.0.2\n"), "usage: ping <a.b.c.d>");
             failures += check("a pipeline needs a program on each side", () -> type(serial, "run /bin/hello |\n"),
                     "usage: run <path> [args] [| <path> [args]]...");
@@ -266,6 +269,17 @@ public class ShellTest {
     }
 
     /** Runs an action and verifies expected output appears without a forbidden output fragment. */
+    /** Something the kernel printed while it booted, before the prompt. */
+    static int booted(String name, String expected) {
+        checks++;
+        if (clean(output.toString()).contains(expected)) {
+            System.out.println("ok   " + name);
+            return 0;
+        }
+        System.out.println("FAIL " + name + ": the boot never printed \"" + expected + "\"");
+        return 1;
+    }
+
     static int checkAbsent(String name, Action action, String expected, String forbidden) throws Exception {
         checks++;
         int from = output.length();

@@ -1,10 +1,15 @@
 package duke.kernel.net;
 
-/** IPv4 without options, fragments or forwarding: what's addressed to us goes up, the rest is dropped. */
+/**
+ * IPv4 without options, fragments or forwarding: what's addressed to us goes up, the rest is dropped.
+ * Before we have an address, UDP to anyone comes up too, since DHCP may answer to the offered one.
+ */
 public final class Ipv4 {
 
     static final int HEADER = 20;
     static final int PROTOCOL_ICMP = 1;
+    static final int PROTOCOL_UDP = 17;
+    static final int BROADCAST = 0xFFFF_FFFF;
 
     private static final int DONT_FRAGMENT = 0x4000;
     private static final int TTL = 64;
@@ -50,12 +55,20 @@ public final class Ipv4 {
         }
         int total = Wire.get16(frame, at + 2);
         if (total < HEADER || at + total > frame.length || Wire.checksum(frame, at, HEADER) != 0
-                || (Wire.get16(frame, at + 6) & 0x3FFF) != 0 || Wire.get32(frame, at + 16) != Network.ADDRESS) {
+                || (Wire.get16(frame, at + 6) & 0x3FFF) != 0) {
             return;
         }
         int source = Wire.get32(frame, at + 12);
-        if ((frame[at + 9] & 0xFF) == PROTOCOL_ICMP) {
+        int destination = Wire.get32(frame, at + 16);
+        int protocol = frame[at + 9] & 0xFF;
+        int ours = Network.address();
+        if (destination != ours && destination != BROADCAST && !(ours == 0 && protocol == PROTOCOL_UDP)) {
+            return;
+        }
+        if (protocol == PROTOCOL_ICMP && destination == ours) {
             Icmp.input(sourceMac, source, frame, at + HEADER, total - HEADER);
+        } else if (protocol == PROTOCOL_UDP) {
+            Udp.input(source, destination, frame, at + HEADER, total - HEADER);
         }
     }
 
@@ -71,14 +84,20 @@ public final class Ipv4 {
         Wire.put16(frame, at + 6, DONT_FRAGMENT);
         frame[at + 8] = (byte) TTL;
         frame[at + 9] = (byte) protocol;
-        Wire.put32(frame, at + 12, Network.ADDRESS);
+        Wire.put32(frame, at + 12, Network.address());
         Wire.put32(frame, at + 16, destination);
         Wire.put16(frame, at + 10, Wire.checksum(frame, at, HEADER));
         return frame;
     }
 
-    /** The MAC to send to for {@code destination}: its own on our link, the gateway's otherwise; -1 if ARP got no answer. */
+    /**
+     * The MAC to send to for {@code destination}: everyone's for the broadcast address, its own on
+     * our link, the gateway's otherwise; -1 if ARP got no answer.
+     */
     static long nextHop(int destination) {
-        return Arp.resolve(Network.onLink(destination) ? destination : Network.GATEWAY);
+        if (destination == BROADCAST) {
+            return Network.BROADCAST;
+        }
+        return Arp.resolve(Network.onLink(destination) ? destination : Network.gateway());
     }
 }
