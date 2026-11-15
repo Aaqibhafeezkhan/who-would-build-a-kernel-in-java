@@ -1,5 +1,6 @@
 package duke.conformance;
 import java.util.ArrayDeque;
+import java.util.BitSet;
 import java.util.Deque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -573,5 +574,97 @@ final class Collections2 {
         Map<Object, Object> map = new HashMap<>();
         map.put("me", map);
         return list + " " + map;
+    }
+
+    static String bitSetSetGetFlip() {
+        BitSet bits = new BitSet();
+        bits.set(1);
+        bits.set(5);
+        bits.set(64);
+        bits.set(130);
+        bits.flip(5);
+        bits.flip(200);
+        StringBuilder sb = new StringBuilder();
+        sb.append(bits.get(1)).append(' ').append(bits.get(5)).append(' ')
+          .append(bits.get(64)).append(' ').append(bits.get(130)).append(' ')
+          .append(bits.get(200)).append(' ').append(bits.get(63));
+        return sb.toString();
+    }
+
+    static String bitSetToStringAndStats() {
+        BitSet bits = new BitSet();
+        bits.set(1);
+        bits.set(5);
+        bits.set(64);
+        bits.set(129);
+        return bits.toString() + " card=" + bits.cardinality() + " len=" + bits.length()
+                + " hash=" + bits.hashCode() + " empty=" + bits.isEmpty();
+    }
+
+    static String bitSetClear() {
+        BitSet bits = new BitSet();
+        bits.set(3);
+        bits.set(70);
+        bits.clear(70);
+        String afterOneClear = bits.toString() + " len=" + bits.length();
+        bits.set(70);
+        bits.clear();
+        return afterOneClear + " " + bits.toString() + " card=" + bits.cardinality() + " empty=" + bits.isEmpty();
+    }
+
+    static String bitSetCombine() {
+        BitSet a = new BitSet();
+        a.set(1);
+        a.set(5);
+        a.set(64);
+        a.set(100);
+        BitSet b = new BitSet();
+        b.set(5);
+        b.set(64);
+        b.set(65);
+        b.set(200);
+        BitSet or = new BitSet();
+        or.or(a);
+        or.or(b);
+        BitSet and = new BitSet();
+        and.or(a);
+        and.and(b);
+        BitSet xor = new BitSet();
+        xor.or(a);
+        xor.xor(b);
+        BitSet andNot = new BitSet();
+        andNot.or(a);
+        andNot.andNot(b);
+        return "or=" + or + " and=" + and + " xor=" + xor + " andNot=" + andNot + " eq=" + and.equals(b);
+    }
+
+    static String bitSetNextBitWalk() {
+        BitSet bits = new BitSet();
+        bits.set(1);
+        bits.set(5);
+        bits.set(64);
+        bits.set(65);
+        bits.set(130);
+        StringBuilder sb = new StringBuilder();
+        for (int i = bits.nextSetBit(0); i >= 0; i = bits.nextSetBit(i + 1)) {
+            sb.append(i).append(' ');
+        }
+        sb.append("| ").append(bits.nextSetBit(200)).append(' ')
+          .append(bits.nextClearBit(0)).append(' ')
+          .append(bits.nextClearBit(1)).append(' ')
+          .append(bits.nextClearBit(64));
+        return sb.toString();
+    }
+
+    static String bitSetRejectsNegativeIndex() {
+        BitSet bits = new BitSet();
+        StringBuilder sb = new StringBuilder();
+        try {
+            bits.set(-1);
+            sb.append("no throw");
+        } catch (IndexOutOfBoundsException e) {
+            sb.append(e.getMessage());
+        }
+        return sb.toString();
     }
 }
