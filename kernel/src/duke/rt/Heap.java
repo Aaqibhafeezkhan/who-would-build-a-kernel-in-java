@@ -153,9 +153,12 @@ public final class Heap {
      * This CPU is inside an allocation or collection, which mustn't be preempted: neither is
      * reentrant, and the thread mustn't move to another CPU while it holds the lock.
      */
-    static boolean allocating() {
+    public static boolean allocating() {
         return LOCK[1] == Magic.cpuIndex() + 1;
     }
+
+    // The holder's stack limit, for unlock to put back: a pending preemption request comes back with it.
+    private static long holderStackLimit;
 
     /** Takes the lock unless this CPU holds it already; true if it did. */
     private static boolean lock() {
@@ -169,12 +172,19 @@ public final class Heap {
         SpinLock.lock(LOCK);
         // No safepoint since the lock was taken, so this is still the CPU that took it.
         LOCK[1] = Magic.cpuIndex() + 1;
+        // Stack checks off until unlock. A StackOverflowError thrown from a prologue in here would
+        // unwind past the unlock and leave the lock held, and with the checks off no preemption
+        // request can land either. Allocating and collecting fit in the 16 KiB below the limit.
+        holderStackLimit = Magic.stackLimit();
+        Magic.setStackLimit(0);
         return true;
     }
 
     private static void unlock() {
+        long limit = holderStackLimit;
         LOCK[1] = 0;
         SpinLock.unlock(LOCK);
+        Magic.setStackLimit(limit);
     }
 
     private static long allocate(long size) {
