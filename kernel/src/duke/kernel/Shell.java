@@ -1,5 +1,6 @@
 package duke.kernel;
 
+import duke.boot.Limine;
 import duke.kernel.acpi.Madt;
 import duke.kernel.fs.Fat;
 import duke.kernel.mm.PhysicalMemory;
@@ -124,7 +125,7 @@ public final class Shell {
         }
         switch (words.get(0)) {
             case "help" -> {
-                Console.println("commands: help, uptime, mem, gc, cpus, threads, pci, ls [path], cat <path>, hexdump <path>, run <path> [args] [| <path> [args]], echo <text>, clear, panic");
+                Console.println("commands: help, uptime, mem, regions, gc, cpus, threads, pci, ls [path], cat <path>, hexdump <path>, run <path> [args] [| <path> [args]], echo <text>, clear, panic");
                 if (!Commands.names().isEmpty()) {
                     StringBuilder more = new StringBuilder("also:");
                     for (int i = 0; i < Commands.names().size(); i++) {
@@ -138,6 +139,7 @@ public final class Shell {
             case "mem" -> Console.println("frames: " + PhysicalMemory.freeFrames() + " free ("
                     + (PhysicalMemory.freeFrames() * PhysicalMemory.PAGE_SIZE >> 20) + " MiB); heap: "
                     + (Heap.used() >> 10) + " KiB used, " + (Heap.committed() >> 10) + " KiB committed");
+            case "regions" -> printRegions();
             case "gc" -> {
                 System.gc();
                 Console.println("collections: " + Heap.collections() + ", live after last: " + (Heap.lastLive() >> 10) + " KiB");
@@ -183,6 +185,15 @@ public final class Shell {
                     Console.println("unknown command: " + words.get(0) + " (try help)");
                 }
             }
+        }
+    }
+
+    private static void printRegions() {
+        for (int i = 0; i < Limine.memoryMapSize(); i++) {
+            long start = Limine.memoryMapBase(i);
+            long size = Limine.memoryMapLength(i);
+            Console.println("0x" + Long.toHexString(start) + "-0x" + Long.toHexString(start + size)
+                    + " (" + size + " bytes) " + Limine.memoryMapTypeName(Limine.memoryMapType(i)));
         }
     }
 

@@ -104,6 +104,8 @@ public class ShellTest {
             failures += check("hexdump first line", () -> type(serial, "hexdump /big.bin\n"), "00000000: 03 0a 11 18 1f 26 2d 34 3b 42 49 50 57 5e 65 6c  .....&-4;BIPW^el");
             failures += check("hexdump last line", () -> type(serial, "hexdump /big.bin\n"), "00001380: 83 8a 91 98 9f a6 ad b4 " + " ".repeat(25) + "........");
             failures += check("help lists hexdump", () -> type(serial, "help\n"), "hexdump <path>");
+            failures += check("regions lists usable memory", () -> type(serial, "regions\n"), " bytes) usable");
+            failures += check("help lists regions", () -> type(serial, "help\n"), "regions");
             failures += check("run", () -> type(serial, "run /bin/hello\n"), "hello from ring 3, I am /bin/hello");
             failures += check("run a crash", () -> type(serial, "run bin/crash\n"), "bin/crash: #GP");
             failures += check("run a text file", () -> type(serial, "run hello.txt\n"), "run: hello.txt: not an ELF file");
