@@ -117,9 +117,10 @@ final class SmpTest {
                 Magic.disableInterrupts();
                 spinningOn = Magic.cpuIndex();
                 spinning = true;
-                // Bounded, in case it landed on the CPU that's meant to locate it.
+                // Bounded, in case it landed on the CPU that's meant to locate it. Reading the clock
+                // only every 1024 turns keeps the NMI mostly landing in this frame, not in nanos().
                 long until = HpetClock.nanos() + 1_000_000_000L;
-                while (spinning && HpetClock.nanos() < until) {
+                for (int i = 1; spinning && ((i & 1023) != 0 || HpetClock.nanos() < until); i++) {
                     Magic.pause();
                 }
                 spinning = false;
@@ -130,12 +131,16 @@ final class SmpTest {
                 Magic.pause();
             }
             long[] where = spinning ? Smp.locate(spinningOn) : null;
+            // Its caller too, while the spinner is still there to read it from.
+            long caller = where != null && where[1] != 0 ? Magic.peekLong(where[1] + 8) - 1 : 0;
             boolean stillSpinning = spinning;
             spinning = false;
             spinner.join();
             if (where != null && stillSpinning) {
                 String at = Backtrace.describe(where[0]);
-                assertTrue(at.contains("SmpTest"), "located at " + at);
+                String from = Backtrace.describe(caller);
+                assertTrue(at.contains("SmpTest") || at.contains("HpetClock.nanos") && from.contains("SmpTest"),
+                        "located at " + at + ", called from " + from);
                 return;
             }
         }
