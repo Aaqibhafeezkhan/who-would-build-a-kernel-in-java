@@ -79,6 +79,11 @@ public final class Scheduler {
 
     /** The lock word, then the holding CPU plus one. */
     private static final int[] LOCK = new int[2];
+    /**
+     * The holder's stack limit, for release to put back. Per CPU: a switch hands the lock to a
+     * thread with its own limit, which switchTo puts here.
+     */
+    private static final long[] HOLDER_LIMIT = new long[Smp.MAX_CPUS];
     private static final Task[] CURRENT = new Task[Smp.MAX_CPUS];
     private static final Task[] IDLE = new Task[Smp.MAX_CPUS];
     private static long lastId;
@@ -142,8 +147,17 @@ public final class Scheduler {
     static long lock() {
         long flags = Magic.flags();
         Magic.disableInterrupts();
+        // Stack checks off until release, as under the heap lock: a StackOverflowError from a
+        // prologue in here would unwind past the release with the lock held and interrupts off.
+        // A pending preemption request goes too, as it always did: with interrupts off the first
+        // prologue would take it and do nothing.
+        Magic.cancelPreemption();
+        int cpu = Magic.cpuIndex();
+        long limit = Magic.stackLimit();
+        Magic.setStackLimit(0);
         SpinLock.lock(LOCK);
-        LOCK[1] = Magic.cpuIndex() + 1;
+        LOCK[1] = cpu + 1;
+        HOLDER_LIMIT[cpu] = limit;
         return flags;
     }
 
@@ -155,8 +169,10 @@ public final class Scheduler {
 
     /** Releases the lock, leaving interrupts off. */
     private static void release() {
+        long limit = HOLDER_LIMIT[Magic.cpuIndex()];
         LOCK[1] = 0;
         SpinLock.unlock(LOCK);
+        Magic.setStackLimit(limit);
     }
 
     /** For java.lang.Thread's default names, Thread-0 onwards. */
@@ -359,7 +375,10 @@ public final class Scheduler {
     static void threadMain() {
         Task self = current();
         Magic.setStackBase(self.stackBottom);
+        // The limit for unlock to install; checks stay off while the lock is held.
         Magic.resetStackLimit();
+        HOLDER_LIMIT[Magic.cpuIndex()] = Magic.stackLimit();
+        Magic.setStackLimit(0);
         reap();
         self.ran = true;
         unlock(INTERRUPT_FLAG);
@@ -432,10 +451,7 @@ public final class Scheduler {
             previous.state = RUNNING;
             return;
         }
-        Magic.cancelPreemption();
-        previous.stackLimit = Magic.stackLimit();
-        // Checks off until the new thread installs its own limit: ours means nothing on its stack.
-        Magic.setStackLimit(0);
+        previous.stackLimit = HOLDER_LIMIT[cpu];
         if (previous.state == RUNNING) {
             // Only idle gets here: everyone else was queued, put to sleep or killed first.
             previous.state = RUNNABLE;
@@ -454,7 +470,7 @@ public final class Scheduler {
         swap(Magic.addressOf(previous.rsp) + Tib.ARRAY_DATA, next.rsp[0]);
         Task self = current();
         Magic.setStackBase(self.stackBottom);
-        Magic.setStackLimit(self.stackLimit);
+        HOLDER_LIMIT[Magic.cpuIndex()] = self.stackLimit;
         reap();
     }
 
