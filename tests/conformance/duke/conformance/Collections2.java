@@ -9,6 +9,7 @@ import java.util.Comparator;
 import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -666,5 +667,82 @@ final class Collections2 {
             sb.append(e.getMessage());
         }
         return sb.toString();
+    }
+
+    // ── LinkedList ──────────────────────────────────────────────────────
+
+    static String linkedListAsListBasics() {
+        List<String> list = new LinkedList<>();
+        list.add("b");
+        list.add("d");
+        list.add(0, "a");
+        list.add(2, "c");
+        list.set(3, "D");
+        String removed = list.remove(1);
+        boolean removedObject = list.remove("zzz");
+        return list + " " + list.size() + " " + removed + " " + removedObject + " "
+            + list.indexOf("D") + " " + list.contains("c") + " " + list.get(0);
+    }
+
+    static String linkedListDequeOps() {
+        LinkedList<String> d = new LinkedList<>();
+        d.addLast("b");
+        d.addLast("c");
+        d.addFirst("a");
+        d.offerLast("d");
+        d.push("z");
+        return d + " " + d.size() + " " + d.peekFirst() + " " + d.peekLast() + " "
+            + d.pop() + " " + d.pollLast() + " " + d.removeFirst() + " " + d;
+    }
+
+    static String linkedListIteratorRemove() {
+        LinkedList<Integer> list = new LinkedList<>();
+        for (int i = 0; i < 10; i++) {
+            list.add(i);
+        }
+        for (Iterator<Integer> it = list.iterator(); it.hasNext(); ) {
+            if (it.next() % 3 == 0) {
+                it.remove();
+            }
+        }
+        return list.toString();
+    }
+
+    static String linkedListToStringAfterEachStep() {
+        LinkedList<String> list = new LinkedList<>();
+        StringBuilder sb = new StringBuilder();
+        list.add("a");
+        sb.append(list).append(';');
+        list.addFirst("z");
+        sb.append(list).append(';');
+        list.addLast("m");
+        sb.append(list).append(';');
+        list.add(1, "mid");
+        sb.append(list).append(';');
+        list.set(0, "Z");
+        sb.append(list).append(';');
+        list.remove(2);
+        sb.append(list).append(';');
+        list.remove("mid");
+        sb.append(list);
+        return sb.toString();
+    }
+
+    static String linkedListEmptyGetFirstThrows() {
+        LinkedList<String> list = new LinkedList<>();
+        try {
+            list.getFirst();
+            return "no throw";
+        } catch (NoSuchElementException e) {
+            return e.getClass().getName();
+        }
+    }
+
+    static String linkedListAcceptsNull() {
+        LinkedList<String> list = new LinkedList<>();
+        list.add(null);
+        list.addFirst(null);
+        list.addLast("x");
+        return list + " " + list.size() + " " + list.contains(null) + " " + list.indexOf(null);
     }
 }
