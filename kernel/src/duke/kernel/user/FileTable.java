@@ -83,6 +83,24 @@ final class FileTable {
         return (int) newfd;
     }
 
+    synchronized int dup3(long oldfd, long newfd, long flags) {
+        if ((flags & ~(long) SystemCalls.O_CLOEXEC) != 0) {
+            return -SystemCalls.EINVAL;
+        }
+        if (oldfd == newfd) {
+            return -SystemCalls.EINVAL;
+        }
+        OpenFile file = get(oldfd);
+        if (file == null || newfd < 0 || newfd >= MAX_FILES) {
+            return -SystemCalls.EBADF;
+        }
+        set((int) newfd, file);
+        if ((flags & SystemCalls.O_CLOEXEC) != 0) {
+            closeOnExec[(int) newfd] = true;
+        }
+        return (int) newfd;
+    }
+
     /** Points {@code fd} at {@code file}, closing whatever was there, as dup2 would. */
     synchronized void replace(int fd, OpenFile file) {
         set(fd, file);

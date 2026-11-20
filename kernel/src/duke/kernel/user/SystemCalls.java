@@ -32,6 +32,7 @@ public final class SystemCalls {
     public static final int BRK = 12;
     public static final int DUP = 32;
     public static final int DUP2 = 33;
+    public static final int DUP3 = 292;
     public static final int GETPID = 39;
     public static final int SCHED_YIELD = 24;
     public static final int IOCTL = 16;
@@ -162,6 +163,8 @@ public final class SystemCalls {
             result = files().dup(a0);
         } else if (number == DUP2) {
             result = files().dup2(a0, a1);
+        } else if (number == DUP3) {
+            result = files().dup3(a0, a1, a2);
         } else if (number == PIPE || number == PIPE2) {
             result = pipe(a0, number == PIPE2 ? a1 : 0);
         } else if (number == FSTAT) {

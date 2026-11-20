@@ -205,6 +205,48 @@ final class FileTest {
         assertEquals(-SystemCalls.EBADF, t.result(dup2HighNew), "dup2 out-of-range newfd");
     }
 
+    static void testDup3() throws InterruptedException {
+        FileTest t = new FileTest();
+        long hello = t.string("/hello.txt");
+        long buffer = t.p.data + BUFFER;
+        int open = t.call(SystemCalls.OPEN, hello, 0, 0);
+        // dup3 fd 3 onto fd 5, no flags
+        int dup3NoFlag = t.call(SystemCalls.DUP3, 3, 5, 0);
+        // read through fd 3, then through fd 5: they share the position
+        int read3 = t.call(SystemCalls.READ, 3, buffer, 6);
+        int read5 = t.call(SystemCalls.READ, 5, buffer + 10, 4);
+        // dup3 fd 3 onto fd 6 with O_CLOEXEC
+        int dup3Cloexec = t.call(SystemCalls.DUP3, 3, 6, SystemCalls.O_CLOEXEC);
+        int read6 = t.call(SystemCalls.READ, 6, buffer + 20, 7);
+        // dup3 onto itself: -EINVAL
+        int ontoSelf = t.call(SystemCalls.DUP3, 3, 3, 0);
+        int ontoSelfCloexec = t.call(SystemCalls.DUP3, 3, 3, SystemCalls.O_CLOEXEC);
+        // unknown flag: -EINVAL
+        int badFlag = t.call(SystemCalls.DUP3, 3, 7, 0x800);
+        // closed oldfd
+        int closedOld = t.call(SystemCalls.DUP3, 9, 7, 0);
+        // negative newfd
+        int negNew = t.call(SystemCalls.DUP3, 3, -1, 0);
+        // out-of-range newfd
+        int highNew = t.call(SystemCalls.DUP3, 3, 64, 0);
+        t.run();
+        assertEquals(3, t.result(open), "open");
+        assertEquals(5, t.result(dup3NoFlag), "dup3 without flags");
+        assertEquals(6, t.result(read3), "read through 3");
+        assertEquals("hello ", t.buffer(0, 6), "first bytes");
+        assertEquals(4, t.result(read5), "read through 5");
+        assertEquals("from", t.buffer(10, 4), "continues where 3 left off");
+        assertEquals(6, t.result(dup3Cloexec), "dup3 with O_CLOEXEC");
+        assertEquals(7, t.result(read6), "read through 6");
+        assertEquals(" FAT32\n", t.buffer(20, 7), "rest of the file through 6");
+        assertEquals(-SystemCalls.EINVAL, t.result(ontoSelf), "dup3 onto itself");
+        assertEquals(-SystemCalls.EINVAL, t.result(ontoSelfCloexec), "dup3 onto itself with O_CLOEXEC");
+        assertEquals(-SystemCalls.EINVAL, t.result(badFlag), "unknown flag");
+        assertEquals(-SystemCalls.EBADF, t.result(closedOld), "closed oldfd");
+        assertEquals(-SystemCalls.EBADF, t.result(negNew), "negative newfd");
+        assertEquals(-SystemCalls.EBADF, t.result(highNew), "out-of-range newfd");
+    }
+
     /** iovecs at IOVECS as (offset into BUFFER, length) pairs, or an address of its own if the offset's negative. */
     private long iovecs(int at, long... vectors) {
         for (int i = 0; i < vectors.length; i += 2) {
