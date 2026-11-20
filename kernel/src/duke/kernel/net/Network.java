@@ -43,6 +43,7 @@ public final class Network {
             Dhcp.configure();
             while (true) {
                 poll();
+                Tcp.tick();
                 try {
                     Thread.sleep(1);
                 } catch (InterruptedException e) {

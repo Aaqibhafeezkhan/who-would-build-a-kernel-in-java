@@ -7,6 +7,7 @@ import duke.kernel.mm.PhysicalMemory;
 import duke.kernel.net.Icmp;
 import duke.kernel.net.Ipv4;
 import duke.kernel.net.Network;
+import duke.kernel.net.Tcp;
 import duke.kernel.pci.Pci;
 import duke.kernel.time.Timer;
 import duke.kernel.user.Elf;
@@ -20,6 +21,7 @@ import java.util.List;
 public final class Shell {
 
     public static final String PROMPT = "duke> ";
+    private static final long NC_IDLE_NANOS = 10_000_000_000L;
 
     private Shell() {
     }
@@ -128,7 +130,7 @@ public final class Shell {
         }
         switch (words.get(0)) {
             case "help" -> {
-                Console.println("commands: help, uptime, mem, regions, gc, cpus, threads, pci, ls [path], cat <path>, hexdump <path>, run <path> [args] [| <path> [args]], ping <address>, echo <text>, clear, panic");
+                Console.println("commands: help, uptime, mem, regions, gc, cpus, threads, pci, ls [path], cat <path>, hexdump <path>, run <path> [args] [| <path> [args]], ping <address>, nc <address> <port> [text], echo <text>, clear, panic");
                 if (!Commands.names().isEmpty()) {
                     StringBuilder more = new StringBuilder("also:");
                     for (int i = 0; i < Commands.names().size(); i++) {
@@ -191,6 +193,24 @@ public final class Shell {
                     Console.println("ping: no address yet");
                 } else {
                     Icmp.ping(address, 3);
+                }
+            }
+            case "nc" -> {
+                Integer address = words.size() >= 3 ? Ipv4.parse(words.get(1)) : null;
+                int port = words.size() >= 3 ? port(words.get(2)) : 0;
+                if (address == null || port == 0) {
+                    Console.println("usage: nc <a.b.c.d> <port> [text]");
+                } else if (!Network.up()) {
+                    Console.println("nc: no network device");
+                } else if (Network.address() == 0) {
+                    Console.println("nc: no address yet");
+                } else {
+                    StringBuilder text = null;
+                    for (int i = 3; i < words.size(); i++) {
+                        text = text == null ? new StringBuilder() : text.append(' ');
+                        text.append(words.get(i));
+                    }
+                    nc(address, port, text == null ? null : text.toString());
                 }
             }
             case "echo" -> Console.println(line.substring(4).strip());
@@ -386,6 +406,49 @@ public final class Shell {
 
             line.append("  ").append(ascii.toString());
             Console.println(line.toString());
+        }
+    }
+
+    /** 1 to 65535, or 0 if {@code word} isn't a port number. */
+    private static int port(String word) {
+        try {
+            int port = Integer.parseInt(word);
+            return port >= 1 && port <= 65535 ? port : 0;
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /** Connects, sends {@code text} and a newline if there's text, and prints what comes back until the peer closes. */
+    private static void nc(int address, int port, String text) {
+        String name = Ipv4.format(address) + ":" + port;
+        Tcp.Connection connection = new Tcp.Connection();
+        int result = connection.connect(address, port);
+        if (result < 0) {
+            Console.println("nc: " + name + ": " + Tcp.describe(result));
+            return;
+        }
+        if (text != null) {
+            byte[] line = new byte[text.length() + 1];
+            for (int i = 0; i < text.length(); i++) {
+                line[i] = (byte) text.charAt(i);
+            }
+            line[text.length()] = '\n';
+            result = connection.write(line, 0, line.length);
+        }
+        // Nothing to interrupt it with, so a peer that never closes can't hold the shell for good.
+        connection.setReadTimeout(NC_IDLE_NANOS);
+        byte[] buffer = new byte[2048];
+        while (result >= 0 && (result = connection.read(buffer, 0, buffer.length)) > 0) {
+            StringBuilder received = new StringBuilder();
+            for (int i = 0; i < result; i++) {
+                received.append((char) (buffer[i] & 0xFF));
+            }
+            Console.print(received.toString());
+        }
+        connection.close();
+        if (result < 0) {
+            Console.println("nc: " + name + ": " + Tcp.describe(result));
         }
     }
 

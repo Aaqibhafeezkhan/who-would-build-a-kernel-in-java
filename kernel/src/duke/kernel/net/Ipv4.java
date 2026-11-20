@@ -8,6 +8,7 @@ public final class Ipv4 {
 
     static final int HEADER = 20;
     static final int PROTOCOL_ICMP = 1;
+    static final int PROTOCOL_TCP = 6;
     static final int PROTOCOL_UDP = 17;
     static final int BROADCAST = 0xFFFF_FFFF;
 
@@ -67,6 +68,8 @@ public final class Ipv4 {
         }
         if (protocol == PROTOCOL_ICMP && destination == ours) {
             Icmp.input(sourceMac, source, frame, at + HEADER, total - HEADER);
+        } else if (protocol == PROTOCOL_TCP && destination == ours) {
+            Tcp.input(sourceMac, source, destination, frame, at + HEADER, total - HEADER);
         } else if (protocol == PROTOCOL_UDP) {
             Udp.input(source, destination, frame, at + HEADER, total - HEADER);
         }

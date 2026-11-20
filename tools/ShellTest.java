@@ -1,5 +1,11 @@
+import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.ByteBuffer;
@@ -41,6 +47,15 @@ public class ShellTest {
     public static void main(String[] args) throws Exception {
         Harness.deleteRecursively(OUT);
         Files.createDirectories(OUT);
+        // For nc: QEMU's user network takes connections to the gateway's address to the host's loopback.
+        ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        Thread serving = new Thread(() -> serve(server));
+        serving.setDaemon(true);
+        serving.start();
+        int closedPort;
+        try (ServerSocket probe = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            closedPort = probe.getLocalPort();
+        }
         Postmortem postmortem = Postmortem.in(OUT, ESP.resolveSibling("kernel.map"));
         Path monitor = postmortem.monitor;
         Path fat32 = OUT.resolve("fat32.img");
@@ -128,6 +143,11 @@ public class ShellTest {
             failures += check("ping an address nobody has", () -> type(serial, "ping 10.0.3.99\n"),
                     "ping: 10.0.3.99: no ARP reply from 10.0.3.99");
             failures += check("ping needs an address", () -> type(serial, "ping 10.0.2\n"), "usage: ping <a.b.c.d>");
+            failures += check("tcp to a server on the host",
+                    () -> type(serial, "nc 10.0.3.2 " + server.getLocalPort() + " hello over tcp\n"), reply("hello over tcp"));
+            failures += check("tcp to a port nobody listens on", () -> type(serial, "nc 10.0.3.2 " + closedPort + " hello\n"),
+                    "nc: 10.0.3.2:" + closedPort + ": connection refused");
+            failures += check("nc needs a port", () -> type(serial, "nc 10.0.3.2\n"), "usage: nc <a.b.c.d> <port> [text]");
             failures += check("a pipeline needs a program on each side", () -> type(serial, "run /bin/hello |\n"),
                     "usage: run <path> [args] [| <path> [args]]...");
             failures += check("ctrl-c ends every program in a pipeline", () -> {
@@ -248,6 +268,28 @@ public class ShellTest {
             channel.connect(UnixDomainSocketAddress.of(monitor));
             channel.write(ByteBuffer.wrap((line + "\n").getBytes(StandardCharsets.US_ASCII)));
             Thread.sleep(300);
+        }
+    }
+
+    /** What serve answers {@code line} with: enough to take several segments. */
+    static String reply(String line) {
+        StringBuilder sb = new StringBuilder("echo: " + line + "\n");
+        for (int i = 1; i <= 500; i++) {
+            sb.append("line ").append(i).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** Answers each connection's first line with {@link #reply}, then closes it. */
+    static void serve(ServerSocket server) {
+        while (!server.isClosed()) {
+            try (Socket socket = server.accept()) {
+                socket.setSoTimeout(10_000);
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.ISO_8859_1));
+                socket.getOutputStream().write(reply(in.readLine()).getBytes(StandardCharsets.ISO_8859_1));
+            } catch (IOException e) {
+                System.out.println("shell-test: the nc server: " + e);
+            }
         }
     }
 
