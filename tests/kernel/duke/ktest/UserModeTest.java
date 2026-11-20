@@ -254,6 +254,32 @@ final class UserModeTest {
             p.free();
         }
     }
+    static void testMuslStartupSystemCalls() {
+        Program p = new Program();
+        int offset = 64;
+        p.load(new Code()
+                .call(SystemCalls.IOCTL, 1, 0x5401, 0, p.data + offset)
+                .call(SystemCalls.SET_TID_ADDRESS, p.data + 128, 0, 0, p.data + offset + 8)
+                .call(SystemCalls.SCHED_YIELD, 0, 0, 0, p.data + offset + 16)
+                .call(SystemCalls.GETUID, 0, 0, 0, p.data + offset + 24)
+                .call(SystemCalls.GETEUID, 0, 0, 0, p.data + offset + 32)
+                .call(SystemCalls.GETGID, 0, 0, 0, p.data + offset + 40)
+                .call(SystemCalls.GETEGID, 0, 0, 0, p.data + offset + 48)
+                .exit(0));
+        try {
+            assertEquals(0, p.run(), "startup syscalls program");
+            assertEquals(-SystemCalls.ENOTTY, Magic.peekLong(p.kernelView(offset)), "ioctl");
+            assertEquals(Scheduler.currentId(), Magic.peekLong(p.kernelView(offset + 8)), "set_tid_address");
+            assertEquals(0, Magic.peekLong(p.kernelView(offset + 16)), "sched_yield");
+            assertEquals(0, Magic.peekLong(p.kernelView(offset + 24)), "getuid");
+            assertEquals(0, Magic.peekLong(p.kernelView(offset + 32)), "geteuid");
+            assertEquals(0, Magic.peekLong(p.kernelView(offset + 40)), "getgid");
+            assertEquals(0, Magic.peekLong(p.kernelView(offset + 48)), "getegid");
+        } finally {
+            p.free();
+        }
+    }
+
     static void testUnameWritesExpectedFields() {
         Program p = new Program();
         int offset = 64;

@@ -33,6 +33,13 @@ public final class SystemCalls {
     public static final int DUP = 32;
     public static final int DUP2 = 33;
     public static final int GETPID = 39;
+    public static final int SCHED_YIELD = 24;
+    public static final int IOCTL = 16;
+    public static final int GETUID = 102;
+    public static final int GETGID = 104;
+    public static final int GETEUID = 107;
+    public static final int GETEGID = 108;
+    public static final int SET_TID_ADDRESS = 218;
     public static final int CLONE = 56;
     public static final int FORK = 57;
     public static final int EXECVE = 59;
@@ -64,6 +71,7 @@ public final class SystemCalls {
     public static final int ENOTDIR = 20;
     public static final int EISDIR = 21;
     public static final int EINVAL = 22;
+    public static final int ENOTTY = 25;
     public static final int EMFILE = 24;
     public static final int ESPIPE = 29;
     public static final int EROFS = 30;
@@ -168,6 +176,15 @@ public final class SystemCalls {
             result = munmap(a0, a1);
         } else if (number == BRK) {
             result = Scheduler.addressSpace().setBreakEnd(a0);
+        } else if (number == IOCTL) {
+            result = -ENOTTY;
+        } else if (number == SET_TID_ADDRESS) {
+            result = Scheduler.currentId();
+        } else if (number == SCHED_YIELD) {
+            Thread.yield();
+            result = 0;
+        } else if (number == GETUID || number == GETEUID || number == GETGID || number == GETEGID) {
+            result = 0;
         } else if (number == GETPID || number == GETPPID) {
             Process self = Process.current();
             result = self == null ? -ESRCH : number == GETPID ? self.pid : self.parentPid();
