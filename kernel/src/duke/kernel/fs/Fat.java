@@ -333,7 +333,8 @@ public final class Fat {
         return cluster >= 2 && cluster < clusters + 2;
     }
 
-    private long next(long cluster) {
+    // Synchronized for fatSector, which every caller shares.
+    private synchronized long next(long cluster) {
         long offset = cluster * (fat32 ? 4 : 2);
         long sector = fatStart + offset / SECTOR;
         if (sector != fatSectorNumber) {

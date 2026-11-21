@@ -56,6 +56,10 @@ public class ShellTest {
         try (ServerSocket probe = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
             closedPort = probe.getLocalPort();
         }
+        int httpPort;
+        try (ServerSocket probe = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            httpPort = probe.getLocalPort();
+        }
         Postmortem postmortem = Postmortem.in(OUT, ESP.resolveSibling("kernel.map"));
         Path monitor = postmortem.monitor;
         Path fat32 = OUT.resolve("fat32.img");
@@ -64,7 +68,7 @@ public class ShellTest {
                 "-drive", "if=none,id=fat32,format=raw,snapshot=on,file=" + fat32,
                 "-device", "virtio-blk-pci,drive=fat32",
                 // Not QEMU's default 10.0.2.0/24, so only an address from DHCP reaches the gateway.
-                "-netdev", "user,id=net0,net=10.0.3.0/24", "-device", "virtio-net-pci,netdev=net0"));
+                "-netdev", "user,id=net0,net=10.0.3.0/24,hostfwd=tcp:127.0.0.1:" + httpPort + "-:80", "-device", "virtio-net-pci,netdev=net0"));
         command.addAll(postmortem.qemuArguments());
         Process qemu = new ProcessBuilder(command)
                 .directory(Harness.ROOT.toFile())
@@ -148,6 +152,21 @@ public class ShellTest {
             failures += check("tcp to a port nobody listens on", () -> type(serial, "nc 10.0.3.2 " + closedPort + " hello\n"),
                     "nc: 10.0.3.2:" + closedPort + ": connection refused");
             failures += check("nc needs a port", () -> type(serial, "nc 10.0.3.2\n"), "usage: nc <a.b.c.d> <port> [text]");
+            failures += check("httpd", () -> type(serial, "httpd\n"), "httpd: serving on port 80");
+            failures += check("httpd once a port", () -> type(serial, "httpd 80\n"), "httpd: port 80 is taken");
+            failures += fetch("http get", httpPort, "GET /hello.txt HTTP/1.1", "HTTP/1.1 200 OK",
+                    "Content-Type: text/plain; charset=utf-8", "Content-Length: 17", "\r\n\r\nhello from FAT32\n");
+            failures += fetch("http head", httpPort, "HEAD /hello.txt HTTP/1.1", "HTTP/1.1 200 OK", "Content-Length: 17", "\r\n\r\n");
+            failures += fetch("http escaped name", httpPort, "GET /a%20long%20file%20name.md HTTP/1.0", "HTTP/1.1 200 OK",
+                    "long names work\n");
+            failures += fetch("http a big file", httpPort, "GET /big.bin HTTP/1.1", "HTTP/1.1 200 OK", "Content-Length: 5000\r\n");
+            failures += fetch("http directory without a slash", httpPort, "GET /docs?x HTTP/1.1", "HTTP/1.1 301 Moved Permanently",
+                    "Location: /docs/\r\n");
+            failures += fetch("http directory", httpPort, "GET /docs/ HTTP/1.1", "HTTP/1.1 200 OK", "<a href=\"deeper/\">deeper/</a>");
+            failures += fetch("http missing file", httpPort, "GET /nope.txt HTTP/1.1", "HTTP/1.1 404 Not Found");
+            failures += fetch("http no way out of the root", httpPort, "GET /../hello.txt HTTP/1.1", "HTTP/1.1 404 Not Found");
+            failures += fetch("http post", httpPort, "POST /hello.txt HTTP/1.1", "HTTP/1.1 405 Method Not Allowed", "Allow: GET, HEAD");
+            failures += fetch("http garbage", httpPort, "hello", "HTTP/1.1 400 Bad Request");
             failures += check("a pipeline needs a program on each side", () -> type(serial, "run /bin/hello |\n"),
                     "usage: run <path> [args] [| <path> [args]]...");
             failures += check("ctrl-c ends every program in a pipeline", () -> {
@@ -291,6 +310,38 @@ public class ShellTest {
                 System.out.println("shell-test: the nc server: " + e);
             }
         }
+    }
+
+    /**
+     * Sends {@code requestLine} to the guest's port 80 through QEMU's forward and checks the response,
+     * read until the server closes, contains each of {@code expected} and a body as long as it says.
+     */
+    static int fetch(String name, int port, String requestLine, String... expected) {
+        checks++;
+        String response;
+        try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
+            socket.setSoTimeout(10_000);
+            socket.getOutputStream().write((requestLine + "\r\nHost: duke\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+            response = new String(socket.getInputStream().readAllBytes(), StandardCharsets.ISO_8859_1);
+        } catch (IOException e) {
+            System.out.println("FAIL " + name + ": " + e);
+            return 1;
+        }
+        for (String e : expected) {
+            if (!response.contains(e)) {
+                System.out.println("FAIL " + name + ": no \"" + e + "\" in:\n" + response.indent(4));
+                return 1;
+            }
+        }
+        Matcher declared = Pattern.compile("\r\nContent-Length: (\\d+)\r\n").matcher(response);
+        int body = response.length() - response.indexOf("\r\n\r\n") - 4;
+        int length = requestLine.startsWith("HEAD ") ? 0 : declared.find() ? Integer.parseInt(declared.group(1)) : -1;
+        if (body != length) {
+            System.out.println("FAIL " + name + ": " + body + " bytes of body, expected " + length + ", in:\n" + response.indent(4));
+            return 1;
+        }
+        System.out.println("ok   " + name);
+        return 0;
     }
 
     interface Action {

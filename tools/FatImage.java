@@ -195,6 +195,11 @@ public class FatImage {
                 .putLong(at + 24, vaddr).putLong(at + 32, filesz).putLong(at + 40, memsz).putLong(at + 48, 0x1000);
     }
 
+    /** Writes the sample to {@code args[0]}, for make run. */
+    public static void main(String[] args) throws Exception {
+        writeSample(Path.of(args[0]));
+    }
+
     public static void writeSample(Path image) throws Exception {
         write(image, sample(), List.of("big.bin"));
     }

@@ -14,6 +14,9 @@ OVMF ?= $(firstword $(wildcard \
 	/usr/share/qemu/OVMF.fd))
 export OVMF
 
+# make run forwards this host port to the guest's 80, for httpd. QEMU won't start if it's taken.
+HTTP_PORT ?= 8080
+
 KERNEL_SRCS   := $(shell find kernel/src -name '*.java')
 # JavaScript modules: jsc translates them to Java under build/jsgen, and the kernel compiles that as
 # one more source root. dukec includes duke/js/gen by default, so nothing refers to the generated code.
@@ -56,8 +59,15 @@ $(BUILD)/limine/BOOTX64.EFI:
 $(BUILD)/esp/boot/kernel.elf: $(BUILD)/kernel.elf $(BUILD)/limine/BOOTX64.EFI boot/limine.conf
 	tools/make-esp.sh $(BUILD)/esp $(BUILD)/limine/BOOTX64.EFI boot/limine.conf $(BUILD)/kernel.elf
 
-run: all
-	tools/qemu.sh $(BUILD)/esp -serial mon:stdio
+# The sample disk shell-test uses, so run and httpd have files.
+$(BUILD)/sample.img: tools/FatImage.java
+	@mkdir -p $(BUILD)
+	java tools/FatImage.java $@
+
+run: all $(BUILD)/sample.img
+	tools/qemu.sh $(BUILD)/esp -serial mon:stdio \
+		-drive if=none,id=disk,format=raw,snapshot=on,file=$(BUILD)/sample.img -device virtio-blk-pci,drive=disk \
+		-netdev user,id=net0,hostfwd=tcp:127.0.0.1:$(HTTP_PORT)-:80 -device virtio-net-pci,netdev=net0
 
 # Waits at reset for a debugger on :1234 (tools/debug.gdb or tools/debug.lldb).
 debug: all

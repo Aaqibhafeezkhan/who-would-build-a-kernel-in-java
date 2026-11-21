@@ -4,6 +4,7 @@ import duke.boot.Limine;
 import duke.kernel.acpi.Madt;
 import duke.kernel.fs.Fat;
 import duke.kernel.mm.PhysicalMemory;
+import duke.kernel.net.Httpd;
 import duke.kernel.net.Icmp;
 import duke.kernel.net.Ipv4;
 import duke.kernel.net.Network;
@@ -130,7 +131,7 @@ public final class Shell {
         }
         switch (words.get(0)) {
             case "help" -> {
-                Console.println("commands: help, uptime, mem, regions, gc, cpus, threads, pci, ls [path], cat <path>, hexdump <path>, run <path> [args] [| <path> [args]], ping <address>, nc <address> <port> [text], echo <text>, clear, panic");
+                Console.println("commands: help, uptime, mem, regions, gc, cpus, threads, pci, ls [path], cat <path>, hexdump <path>, run <path> [args] [| <path> [args]], ping <address>, nc <address> <port> [text], httpd [port], echo <text>, clear, panic");
                 if (!Commands.names().isEmpty()) {
                     StringBuilder more = new StringBuilder("also:");
                     for (int i = 0; i < Commands.names().size(); i++) {
@@ -211,6 +212,18 @@ public final class Shell {
                         text.append(words.get(i));
                     }
                     nc(address, port, text == null ? null : text.toString());
+                }
+            }
+            case "httpd" -> {
+                int port = words.size() == 1 ? 80 : words.size() == 2 ? port(words.get(1)) : 0;
+                if (port == 0) {
+                    Console.println("usage: httpd [port]");
+                } else if (!Network.up()) {
+                    Console.println("httpd: no network device");
+                } else if (Httpd.start(port)) {
+                    Console.println("httpd: serving on port " + port);
+                } else {
+                    Console.println("httpd: port " + port + " is taken");
                 }
             }
             case "echo" -> Console.println(line.substring(4).strip());

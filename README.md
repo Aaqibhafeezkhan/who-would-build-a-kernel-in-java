@@ -70,6 +70,7 @@ covers both. Put the firmware somewhere unusual? Set `OVMF=/path/to/OVMF_CODE.fd
 
 ```sh
 make run          # build and boot to a shell on your terminal (try help); Ctrl-A X quits
+                  # httpd in the shell serves the disk at http://localhost:8080 (HTTP_PORT=...)
 make test         # unit tests, jsc vs node, boot, conformance, panic, kernel and shell suites
 make disasm       # objdump the kernel (symbols included)
 make debug        # boot halted for a debugger: lldb -s tools/debug.lldb, or gdb -x tools/debug.gdb

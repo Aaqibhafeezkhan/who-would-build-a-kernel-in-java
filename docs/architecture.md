@@ -160,6 +160,11 @@ frames, and drops every seventh segment to make the retransmission happen. The s
 out, and `make shell-test` points it at a server on the host, which QEMU reaches through the
 gateway's address.
 
+The shell's `httpd` serves the mounted filesystem over HTTP/1.1, one request per connection, all on
+one kernel thread, so a client gets 5 s to send its headers before it's dropped. QEMU's `hostfwd`
+forwards a host port to the guest's 80: 8080 for `make run`, and a free one for `make shell-test`,
+which fetches files, directory pages and errors through it.
+
 `duke.kernel.fs.Fat` reads FAT32 and FAT16 volumes, on a whole disk or in the first FAT partition
 of an MBR, and the boot mounts the first one it finds for the shell's `ls` and `cat`. It follows
 cluster chains through the FAT and reads long names, checking each against its short name's
