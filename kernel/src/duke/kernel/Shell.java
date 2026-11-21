@@ -188,9 +188,9 @@ public final class Shell {
                 Integer address = words.size() == 2 ? Ipv4.parse(words.get(1)) : null;
                 if (address == null) {
                     Console.println("usage: ping <a.b.c.d>");
-                } else if (!Network.up()) {
+                } else if (!Network.up() && !Ipv4.loopback(address)) {
                     Console.println("ping: no network device");
-                } else if (Network.address() == 0) {
+                } else if (Network.address() == 0 && !Ipv4.loopback(address)) {
                     Console.println("ping: no address yet");
                 } else {
                     Icmp.ping(address, 3);
@@ -201,9 +201,9 @@ public final class Shell {
                 int port = words.size() >= 3 ? port(words.get(2)) : 0;
                 if (address == null || port == 0) {
                     Console.println("usage: nc <a.b.c.d> <port> [text]");
-                } else if (!Network.up()) {
+                } else if (!Network.up() && !Ipv4.loopback(address)) {
                     Console.println("nc: no network device");
-                } else if (Network.address() == 0) {
+                } else if (Network.address() == 0 && !Ipv4.loopback(address)) {
                     Console.println("nc: no address yet");
                 } else {
                     StringBuilder text = null;

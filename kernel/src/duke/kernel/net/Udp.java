@@ -75,7 +75,7 @@ public final class Udp {
         Wire.put16(frame, at + 2, destinationPort);
         Wire.put16(frame, at + 4, length);
         System.arraycopy(data, 0, frame, at + HEADER, data.length);
-        int checksum = Wire.checksum(frame, at, length, pseudoHeader(Network.address(), destination, length));
+        int checksum = Wire.checksum(frame, at, length, pseudoHeader(Ipv4.source(destination), destination, length));
         // 0 would say there's no checksum; its ones' complement twin means the same sum.
         Wire.put16(frame, at + 6, checksum == 0 ? 0xFFFF : checksum);
         Network.send(frame);

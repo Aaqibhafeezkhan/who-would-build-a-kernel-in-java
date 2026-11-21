@@ -147,6 +147,7 @@ public class ShellTest {
             failures += check("ping an address nobody has", () -> type(serial, "ping 10.0.3.99\n"),
                     "ping: 10.0.3.99: no ARP reply from 10.0.3.99");
             failures += check("ping needs an address", () -> type(serial, "ping 10.0.2\n"), "usage: ping <a.b.c.d>");
+            failures += check("ping loopback", () -> type(serial, "ping 127.0.0.1\n"), "3 sent, 3 received");
             failures += check("tcp to a server on the host",
                     () -> type(serial, "nc 10.0.3.2 " + server.getLocalPort() + " hello over tcp\n"), reply("hello over tcp"));
             failures += check("tcp to a port nobody listens on", () -> type(serial, "nc 10.0.3.2 " + closedPort + " hello\n"),

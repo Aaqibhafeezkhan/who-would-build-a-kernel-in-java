@@ -126,7 +126,7 @@ public final class Tcp {
 
         /** Opens a connection to {@code address} and {@code port}: 0 once it's established, or a negative errno. */
         public int connect(int address, int port) {
-            if (Network.address() == 0) {
+            if (Network.address() == 0 && !Ipv4.loopback(address)) {
                 return -ENETUNREACH;
             }
             long nextHop = Ipv4.nextHop(address);
@@ -349,7 +349,7 @@ public final class Tcp {
                     return -ETIMEDOUT;
                 }
             }
-            if (!Network.up() || !Network.poll()) {
+            if (!Network.poll()) {
                 synchronized (LOCK) {
                     if (done.met()) {
                         return 0;
@@ -811,7 +811,7 @@ public final class Tcp {
     private static void transmit(byte[] frame, int destination) {
         int at = Network.ETHERNET_HEADER + Ipv4.HEADER;
         int length = frame.length - at;
-        Wire.put16(frame, at + 16, Wire.checksum(frame, at, length, pseudoHeader(Network.address(), destination, length)));
+        Wire.put16(frame, at + 16, Wire.checksum(frame, at, length, pseudoHeader(Ipv4.source(destination), destination, length)));
         if (dropEvery > 0 && ++segmentsSent % dropEvery == 0) {
             return;
         }

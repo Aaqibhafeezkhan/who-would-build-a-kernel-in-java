@@ -3,6 +3,7 @@ package duke.ktest;
 import static duke.ktest.Assert.assertEquals;
 import static duke.ktest.Assert.assertTrue;
 
+import duke.kernel.net.Ipv4;
 import duke.kernel.net.Network;
 import duke.kernel.net.Tcp;
 import duke.kernel.time.HpetClock;
@@ -16,12 +17,31 @@ final class TcpTest {
     private static final long TIMEOUT_NANOS = 30_000_000_000L;
 
     static void testAConnectionToItselfMovesAMegabyteEachWay() throws InterruptedException {
-        transfer(7001, 1 << 20, 0);
+        awaitAddress();
+        transfer(Network.address(), 7001, 1 << 20, 0);
     }
 
     // Every seventh segment never leaves, data, acknowledgments, SYNs and FINs alike.
     static void testLostSegmentsAreSentAgain() throws InterruptedException {
-        transfer(7002, 256 << 10, 7);
+        awaitAddress();
+        transfer(Network.address(), 7002, 256 << 10, 7);
+    }
+
+    static void testLoopbackMovesAMegabyteEachWay() throws InterruptedException {
+        transfer(Ipv4.address(127, 0, 0, 1), 7005, 1 << 20, 0);
+    }
+
+    static void testLoopbackLosesSegmentsToo() throws InterruptedException {
+        transfer(Ipv4.address(127, 0, 0, 1), 7006, 64 << 10, 7);
+    }
+
+    static void testAllOf127IsLoopback() throws InterruptedException {
+        transfer(Ipv4.address(127, 1, 2, 3), 7007, 4096, 0);
+    }
+
+    static void testNobodyListeningOnLoopbackRefusesTheConnection() {
+        Tcp.Connection connection = new Tcp.Connection();
+        assertEquals(-Tcp.ECONNREFUSED, connection.connect(Ipv4.address(127, 0, 0, 1), 7008), "connect");
     }
 
     static void testNobodyListeningRefusesTheConnection() throws InterruptedException {
@@ -43,8 +63,7 @@ final class TcpTest {
     }
 
     // Each end sends size bytes and closes, while reading the other's until it closes too.
-    private static void transfer(int port, int size, int dropEvery) throws InterruptedException {
-        awaitAddress();
+    private static void transfer(int address, int port, int size, int dropEvery) throws InterruptedException {
         Tcp.Listener listener = Tcp.listen(port);
         assertTrue(listener != null, "listen");
         Tcp.dropEvery(dropEvery);
@@ -56,7 +75,7 @@ final class TcpTest {
             });
             serverThread.start();
             Tcp.Connection client = new Tcp.Connection();
-            int connected = client.connect(Network.address(), port);
+            int connected = client.connect(address, port);
             assertEquals(0, connected, "connect: " + Tcp.describe(connected));
             assertEquals(port, client.remotePort(), "remote port");
             String result = exchange(client, size, 2, 1);

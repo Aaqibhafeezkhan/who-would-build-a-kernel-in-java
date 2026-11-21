@@ -3,11 +3,15 @@ package duke.kernel.net;
 import duke.kernel.Console;
 import duke.kernel.time.HpetClock;
 import duke.kernel.virtio.VirtioNet;
+import java.util.ArrayList;
 
 /**
- * The one network interface, on the virtio-net device, its address from DHCP. A kernel thread asks
- * for one, then reads frames every tick; anything waiting on an answer, like ping, polls as well so
- * its round trip isn't rounded up to the next tick.
+ * The one network interface, on the virtio-net device, its address from DHCP, and loopback. A kernel
+ * thread asks for an address, then reads frames every tick; anything waiting on an answer, like
+ * ping, polls as well so its round trip isn't rounded up to the next tick.
+ *
+ * <p>Frames to 127.0.0.0/8 go on a queue that polling reads like the NIC's, rather than straight
+ * back up: they're sent under TCP's lock, and reading takes this class's lock before that one.
  */
 public final class Network {
 
@@ -22,6 +26,9 @@ public final class Network {
     static final int TYPE_ARP = 0x0806;
 
     private static final Object LOCK = new Object();
+    // Taken last, after LOCK and TCP's.
+    private static final Object LOOPBACK = new Object();
+    private static ArrayList<byte[]> looped = new ArrayList<>();
     private static VirtioNet nic;
     // 0 until DHCP or the fallback configures the interface.
     private static volatile int address;
@@ -36,11 +43,11 @@ public final class Network {
     public static void init() {
         VirtioNet.init();
         nic = VirtioNet.device();
-        if (nic == null) {
-            return;
-        }
+        // Without a NIC there's still loopback, and TCP's timers.
         Thread reader = new Thread(() -> {
-            Dhcp.configure();
+            if (nic != null) {
+                Dhcp.configure();
+            }
             while (true) {
                 poll();
                 Tcp.tick();
@@ -113,7 +120,18 @@ public final class Network {
     static boolean poll() {
         boolean any = false;
         synchronized (LOCK) {
-            for (byte[] frame = nic.receive(); frame != null; frame = nic.receive()) {
+            ArrayList<byte[]> back;
+            synchronized (LOOPBACK) {
+                back = looped;
+                if (!back.isEmpty()) {
+                    looped = new ArrayList<>();
+                }
+            }
+            for (byte[] frame : back) {
+                any = true;
+                Ipv4.input(0, frame, true);
+            }
+            for (byte[] frame = nic == null ? null : nic.receive(); frame != null; frame = nic.receive()) {
                 any = true;
                 if (frame.length < ETHERNET_HEADER) {
                     continue;
@@ -121,7 +139,7 @@ public final class Network {
                 long source = Wire.get48(frame, 6);
                 switch (Wire.get16(frame, 12)) {
                     case TYPE_ARP -> Arp.input(frame);
-                    case TYPE_IPV4 -> Ipv4.input(source, frame);
+                    case TYPE_IPV4 -> Ipv4.input(source, frame, false);
                     default -> {
                     }
                 }
@@ -134,13 +152,19 @@ public final class Network {
     static byte[] frame(long destination, int type, int payloadLength) {
         byte[] frame = new byte[ETHERNET_HEADER + payloadLength];
         Wire.put48(frame, 0, destination);
-        Wire.put48(frame, 6, nic.mac());
+        Wire.put48(frame, 6, nic == null ? 0 : nic.mac());
         Wire.put16(frame, 12, type);
         return frame;
     }
 
     static void send(byte[] frame) {
-        nic.send(frame, frame.length);
+        if (Wire.get16(frame, 12) == TYPE_IPV4 && Ipv4.loopback(Wire.get32(frame, ETHERNET_HEADER + 16))) {
+            synchronized (LOOPBACK) {
+                looped.add(frame);
+            }
+        } else if (nic != null) {
+            nic.send(frame, frame.length);
+        }
     }
 
     /** Whether {@code destination} is on our link, so it's reached directly rather than through the gateway. */

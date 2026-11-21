@@ -3,6 +3,7 @@ package duke.kernel.net;
 /**
  * IPv4 without options, fragments or forwarding: what's addressed to us goes up, the rest is dropped.
  * Before we have an address, UDP to anyone comes up too, since DHCP may answer to the offered one.
+ * 127.0.0.0/8 never reaches the NIC: {@link Network} hands it straight back.
  */
 public final class Ipv4 {
 
@@ -49,7 +50,21 @@ public final class Ipv4 {
         return (address >>> 24) + "." + (address >>> 16 & 0xFF) + "." + (address >>> 8 & 0xFF) + "." + (address & 0xFF);
     }
 
-    static void input(long sourceMac, byte[] frame) {
+    public static boolean loopback(int address) {
+        return address >>> 24 == 127;
+    }
+
+    /**
+     * The address we send to {@code destination} from. Linux sends to any of 127.0.0.0/8 from
+     * 127.0.0.1, but with one connection table keyed on the peer's address, a reply from where it was
+     * sent is what keeps 127.0.0.2 working.
+     */
+    static int source(int destination) {
+        return loopback(destination) ? destination : Network.address();
+    }
+
+    /** {@code looped} says the frame came back from {@link Network#send}, the only way to 127.0.0.0/8. */
+    static void input(long sourceMac, byte[] frame, boolean looped) {
         int at = Network.ETHERNET_HEADER;
         if (frame.length < at + HEADER || (frame[at] & 0xFF) != 0x45) {
             return;
@@ -62,8 +77,9 @@ public final class Ipv4 {
         int source = Wire.get32(frame, at + 12);
         int destination = Wire.get32(frame, at + 16);
         int protocol = frame[at + 9] & 0xFF;
-        int ours = Network.address();
-        if (destination != ours && destination != BROADCAST && !(ours == 0 && protocol == PROTOCOL_UDP)) {
+        int ours = looped && loopback(destination) ? destination : Network.address();
+        if (destination != ours && destination != BROADCAST && !(ours == 0 && protocol == PROTOCOL_UDP)
+                || loopback(source) != looped) {
             return;
         }
         if (protocol == PROTOCOL_ICMP && destination == ours) {
@@ -87,7 +103,7 @@ public final class Ipv4 {
         Wire.put16(frame, at + 6, DONT_FRAGMENT);
         frame[at + 8] = (byte) TTL;
         frame[at + 9] = (byte) protocol;
-        Wire.put32(frame, at + 12, Network.address());
+        Wire.put32(frame, at + 12, source(destination));
         Wire.put32(frame, at + 16, destination);
         Wire.put16(frame, at + 10, Wire.checksum(frame, at, HEADER));
         return frame;
@@ -98,6 +114,9 @@ public final class Ipv4 {
      * our link, the gateway's otherwise; -1 if ARP got no answer.
      */
     static long nextHop(int destination) {
+        if (loopback(destination)) {
+            return 0;
+        }
         if (destination == BROADCAST) {
             return Network.BROADCAST;
         }

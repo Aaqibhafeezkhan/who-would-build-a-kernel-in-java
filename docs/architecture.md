@@ -151,6 +151,12 @@ its gateway itself, so `make shell-test` pings it with no root or tap device, on
 QEMU's default so only an address from DHCP gets there. ktest's NIC hears only its own frames,
 which covers the fallback.
 
+Frames to 127.0.0.0/8 never reach the NIC: `Network.send` queues them and polling reads them back
+like received ones, NIC or not, so loopback works on a machine with no network device. They can't
+go straight back up, since TCP sends under its own lock and reading takes the network's first. Each
+reply comes from the 127 address it answers rather than Linux's 127.0.0.1, because connections are
+keyed on the peer's address alone.
+
 TCP keeps a 64 KiB buffer each way per connection, so it offers a window without scaling. It drops
 segments that arrive out of order and resends from the first unacknowledged byte after an RFC 6298
 timeout or three duplicate acknowledgments, with no congestion control. A connection's segments go
