@@ -1,4 +1,6 @@
 build/
+compiler/bin/
+*.class
 .gradle/
 compiler/build/
 .idea/

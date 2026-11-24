@@ -62,6 +62,59 @@ final class StringConcat {
         return inserted + "|" + sb + "|" + sb.length();
     }
 
+    static String builderInsertString() {
+        StringBuilder sb = new StringBuilder(2).append("duke");
+        sb.insert(2, "-kernel").insert(0, (String) null).insert(sb.length(), "!");
+        return sb + "|" + sb.length();
+    }
+
+    static String builderInsertStringIndexMessages() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            new StringBuilder("abc").insert(5, "x");
+        } catch (StringIndexOutOfBoundsException e) {
+            sb.append(e.getMessage()).append(';');
+        }
+        try {
+            new StringBuilder("abc").insert(-1, "x");
+        } catch (StringIndexOutOfBoundsException e) {
+            sb.append(e.getMessage());
+        }
+        return sb.toString();
+    }
+
+    static String builderDelete() {
+        StringBuilder sb = new StringBuilder("0123456789");
+        sb.delete(2, 5).delete(3, 99).delete(1, 1);
+        return sb + "|" + sb.length();
+    }
+
+    static String builderDeleteIndexMessages() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            new StringBuilder("abc").delete(-1, 2);
+        } catch (StringIndexOutOfBoundsException e) {
+            sb.append(e.getMessage()).append(';');
+        }
+        try {
+            new StringBuilder("abc").delete(4, 4);
+        } catch (StringIndexOutOfBoundsException e) {
+            sb.append(e.getMessage()).append(';');
+        }
+        try {
+            new StringBuilder("abc").delete(2, 1);
+        } catch (StringIndexOutOfBoundsException e) {
+            sb.append(e.getMessage());
+        }
+        return sb.toString();
+    }
+
+    static String builderIndexOf() {
+        StringBuilder sb = new StringBuilder("ababa");
+        return sb.indexOf("ba") + " " + sb.indexOf("z") + " " + sb.indexOf("") + " "
+                + new StringBuilder().indexOf("") + " " + sb.indexOf("aba");
+    }
+
     static String builderIndexMessages() {
         StringBuilder sb = new StringBuilder();
         try {

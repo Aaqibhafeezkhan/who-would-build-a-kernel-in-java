@@ -131,10 +131,58 @@ public final class StringBuilder {
         return this;
     }
 
+    public StringBuilder insert(int index, String s) {
+        if (index < 0 || index > count) {
+            throw new StringIndexOutOfBoundsException("Range [" + index + ", " + count + ") out of bounds for length " + count);
+        }
+        if (s == null) {
+            s = "null";
+        }
+        int n = s.length();
+        ensureCapacity(count + n);
+        System.arraycopy(value, index, value, index + n, count - index);
+        s.copyBytes(value, index);
+        count += n;
+        return this;
+    }
+
+    public StringBuilder delete(int start, int end) {
+        if (end > count) {
+            end = count;
+        }
+        if (start < 0 || start > count || start > end) {
+            throw new StringIndexOutOfBoundsException(
+                    "Range [" + start + ", " + end + ") out of bounds for length " + count);
+        }
+        int removed = end - start;
+        System.arraycopy(value, end, value, start, count - end);
+        int newCount = count - removed;
+        for (int i = newCount; i < count; i++) {
+            value[i] = 0;
+        }
+        count = newCount;
+        return this;
+    }
+
     public StringBuilder deleteCharAt(int index) {
         checkIndex(index);
         System.arraycopy(value, index + 1, value, index, count - index - 1);
         value[--count] = 0;
         return this;
+    }
+
+    public int indexOf(String str) {
+        int strLength = str.length();
+        int max = count - strLength;
+        for (int i = 0; i <= max; i++) {
+            int j = 0;
+            while (j < strLength && (value[i + j] & 0xFF) == str.charAt(j)) {
+                j++;
+            }
+            if (j == strLength) {
+                return i;
+            }
+        }
+        return -1;
     }
 }
