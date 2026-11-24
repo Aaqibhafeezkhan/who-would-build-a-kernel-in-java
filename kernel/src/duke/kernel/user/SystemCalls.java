@@ -231,6 +231,8 @@ public final class SystemCalls {
             Magic.disableInterrupts();
             Magic.leaveUser(frame + FRAME_BYTES, (int) a0);
             return;
+        } else if (number >= SocketCalls.SOCKET && number <= SocketCalls.SETSOCKOPT || number == SocketCalls.ACCEPT4) {
+            result = socketCall(number, a0, a1, a2, Frame.register(frame, Frame.R10), Frame.register(frame, Frame.R8));
         } else if (number == CLOCK_GETTIME) {
             result = clockGettime(a0, a1);
         } else if (number == NANOSLEEP) {
@@ -299,7 +301,23 @@ public final class SystemCalls {
         return reaped.pid;
     }
 
-    private static FileTable files() {
+    private static long socketCall(long number, long a0, long a1, long a2, long a3, long a4) {
+        return switch ((int) number) {
+            case SocketCalls.SOCKET -> SocketCalls.socket(a0, a1, a2);
+            case SocketCalls.CONNECT, SocketCalls.BIND -> SocketCalls.connectOrBind(a0, a1, a2, number == SocketCalls.CONNECT);
+            case SocketCalls.ACCEPT -> SocketCalls.accept(a0, a1, a2, 0);
+            case SocketCalls.ACCEPT4 -> SocketCalls.accept(a0, a1, a2, a3);
+            case SocketCalls.SENDTO -> SocketCalls.sendto(a0, a1, a2, a3);
+            case SocketCalls.RECVFROM -> SocketCalls.recvfrom(a0, a1, a2, a3);
+            case SocketCalls.SHUTDOWN -> SocketCalls.shutdown(a0, a1);
+            case SocketCalls.LISTEN -> SocketCalls.listen(a0);
+            case SocketCalls.GETSOCKNAME, SocketCalls.GETPEERNAME -> SocketCalls.name(a0, a1, a2, number == SocketCalls.GETPEERNAME);
+            case SocketCalls.SETSOCKOPT -> SocketCalls.setsockopt(a0, a1, a2, a3, a4);
+            default -> -ENOSYS;
+        };
+    }
+
+    static FileTable files() {
         Process self = Process.current();
         return self != null ? self.files : FileTable.NO_PROCESS;
     }
@@ -694,6 +712,12 @@ public final class SystemCalls {
             }
             stuck = address + done;
         }
+    }
+
+    /** Reads from user memory already checked readable; null if a page of it has gone since. */
+    static byte[] getBytes(long address, int count) {
+        byte[] bytes = new byte[count];
+        return Magic.copyUserMemory(Magic.addressOf(bytes) + Tib.ARRAY_DATA, address, count) == 0 ? bytes : null;
     }
 
     /** Reads from user memory already checked readable; null if a page of it has gone since. */

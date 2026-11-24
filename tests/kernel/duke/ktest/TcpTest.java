@@ -7,6 +7,7 @@ import duke.kernel.net.Ipv4;
 import duke.kernel.net.Network;
 import duke.kernel.net.Tcp;
 import duke.kernel.time.HpetClock;
+import java.util.function.Supplier;
 
 /**
  * ktest's NIC hears its own frames back, so a connection to our own address goes out over the
@@ -50,6 +51,27 @@ final class TcpTest {
         assertEquals(-Tcp.ECONNREFUSED, connection.connect(Network.address(), 7003), "connect");
         byte[] buffer = new byte[1];
         assertEquals(-Tcp.ECONNREFUSED, connection.read(buffer, 0, 1), "read after the refusal");
+    }
+
+    static void testAnInterruptEndsAnAccept() throws InterruptedException {
+        Tcp.Listener listener = Tcp.listen(7009);
+        Thread[] waiter = new Thread[1];
+        boolean[] stop = new boolean[1];
+        Tcp.Connection[] accepted = {new Tcp.Connection()};
+        Supplier<Boolean> previous = Tcp.setInterrupt(null);
+        Tcp.setInterrupt(() -> stop[0] && Thread.currentThread() == waiter[0] || previous != null && previous.get());
+        try {
+            waiter[0] = new Thread(() -> accepted[0] = listener.accept());
+            waiter[0].start();
+            Thread.sleep(50);
+            assertTrue(waiter[0].isAlive(), "accept waits");
+            stop[0] = true;
+            waiter[0].join();
+            assertTrue(accepted[0] == null, "accept ends with nothing");
+        } finally {
+            Tcp.setInterrupt(previous);
+            listener.close();
+        }
     }
 
     static void testOneListenerAPort() {

@@ -2,6 +2,7 @@ package duke.kernel.net;
 
 import duke.kernel.time.HpetClock;
 import java.util.ArrayList;
+import java.util.function.Supplier;
 
 /**
  * TCP (RFC 9293): connect, listen and accept, a window each way and retransmission. Segments that
@@ -66,6 +67,7 @@ public final class Tcp {
     private static final ArrayList<Connection> connections = new ArrayList<>();
     private static final ArrayList<Listener> listeners = new ArrayList<>();
     private static int nextPort;
+    private static volatile Supplier<Boolean> interrupt;
     private static int dropEvery;
     private static int segmentsSent;
 
@@ -236,6 +238,10 @@ public final class Tcp {
             }
         }
 
+        public int localAddress() {
+            return Ipv4.source(remoteAddress);
+        }
+
         public int localPort() {
             return localPort;
         }
@@ -292,9 +298,15 @@ public final class Tcp {
         }
     }
 
-    /** Listens on {@code port}; null if something listens there already. */
+    /** Listens on {@code port}, or a free one for 0; null if something listens there already. */
     public static Listener listen(int port) {
         synchronized (LOCK) {
+            if (port == 0) {
+                port = ephemeralPort();
+                if (port == 0) {
+                    return null;
+                }
+            }
             for (Listener l : listeners) {
                 if (l.port == port) {
                     return null;
@@ -336,10 +348,21 @@ public final class Tcp {
     }
 
     /**
+     * Asked by each thread waiting here, every millisecond or so: true ends its wait with EINTR. For
+     * a process that's been killed, which can't be woken any other way. Returns the check it replaces.
+     */
+    public static Supplier<Boolean> setInterrupt(Supplier<Boolean> check) {
+        Supplier<Boolean> previous = interrupt;
+        interrupt = check;
+        return previous;
+    }
+
+    /**
      * Reads frames until {@code done}, or until {@code deadline} (0 for none) passes: 0, -ETIMEDOUT
      * or -EINTR. Reading them here rather than waiting for the net thread saves up to a tick a round trip.
      */
     private static int await(Condition done, long deadline) {
+        Supplier<Boolean> interrupted = interrupt;
         while (true) {
             synchronized (LOCK) {
                 if (done.met()) {
@@ -348,6 +371,9 @@ public final class Tcp {
                 if (deadline != 0 && HpetClock.nanos() >= deadline) {
                     return -ETIMEDOUT;
                 }
+            }
+            if (interrupted != null && interrupted.get()) {
+                return -EINTR;
             }
             if (!Network.poll()) {
                 synchronized (LOCK) {
