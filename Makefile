@@ -26,7 +26,7 @@ JS_SRCS       := $(wildcard kernel/js/*.js)
 KERNEL_JAVAC  := javac --system none -XDstringConcat=inline
 COMPILER_SRCS := $(shell find compiler/src/main -name '*.java') compiler/build.gradle.kts
 
-.PHONY: all compiler run debug test unit-test boot-test conformance conformance-gc panic-tests ktest shell-test js-test user-test c-test disasm clean
+.PHONY: all compiler run debug test unit-test boot-test conformance conformance-gc panic-tests ktest shell-test js-test user-test c-test busybox-test disasm clean
 
 all: $(BUILD)/esp/boot/kernel.elf
 
@@ -73,7 +73,7 @@ run: all $(BUILD)/sample.img
 debug: all
 	tools/qemu.sh $(BUILD)/esp -serial mon:stdio -s -S
 
-test: unit-test js-test boot-test conformance panic-tests ktest shell-test user-test c-test
+test: unit-test js-test boot-test conformance panic-tests ktest shell-test user-test c-test busybox-test
 
 unit-test:
 	./gradlew -q :compiler:test
@@ -112,6 +112,10 @@ user-test: $(DUKEC) all
 # C programs built static against musl, Linux vs Duke. Needs musl-gcc on x86-64 Linux, or Docker.
 c-test: all
 	java tools/CTests.java
+
+# Busybox built from its release tarball, Linux vs Duke. Needs Docker.
+busybox-test: all
+	java tools/BusyboxTest.java
 
 disasm: $(BUILD)/kernel.elf
 	objdump -d -M intel $(BUILD)/kernel.elf | less

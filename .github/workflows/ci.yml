@@ -99,6 +99,9 @@ jobs:
       - name: C programs in ring 3 (musl, Linux vs Duke)
         run: make c-test
 
+      - name: Busybox in ring 3 (built from source, Linux vs Duke)
+        run: make busybox-test
+
       - name: Upload kernel and logs
         if: always()
         uses: actions/upload-artifact@v7
@@ -122,6 +125,8 @@ jobs:
             build/user-tests/duke/qemu.log
             build/c-tests/duke/serial.log
             build/c-tests/duke/qemu.log
+            build/busybox/duke/serial.log
+            build/busybox/duke/qemu.log
             build/js-tests/duke/serial.log
             build/js-tests/duke/qemu.log
             compiler/build/reports/tests/

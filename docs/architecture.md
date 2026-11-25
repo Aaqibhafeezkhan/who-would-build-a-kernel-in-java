@@ -388,6 +388,12 @@ status on Linux and on Duke. musl's stdio goes through `readv` and `writev`, and
 like an `mmap`'s, until it would run into a mapping or the stack. Without `brk`, mallocng would
 fall back to `mmap(PROT_NONE)` and `mprotect`, which Duke doesn't have yet.
 
+`make busybox-test` does the same for busybox 1.37.0, built static against musl from the release
+tarball (checked against its sha256) with the default configuration, less `tc`. Its command lines
+run on the sample disk with busybox at `/bin/busybox`, and on Linux in Alpine with the same files
+mounted at the same paths. The tarball rather than Alpine's `busybox-static`, because Alpine keeps
+only a package's latest version and builds that one without `httpd`.
+
 Java programs run in ring 3 too. `dukec --user` builds one into a static executable linked at
 0x400000 that runs unchanged on Linux and on Duke. Its `_start` points GS at the CPU block with
 `arch_prctl(ARCH_SET_GS)` instead of writing the MSR, switches to a stack in its own bss, and calls

@@ -23,7 +23,8 @@ You need JDK 25, `make`, `git`, `qemu-system-x86_64`, x86_64 UEFI firmware, and 
 - macOS: `brew install openjdk qemu` (Homebrew's QEMU includes the firmware).
 - Debian/Ubuntu: `apt install openjdk-25-jdk qemu-system-x86 ovmf musl-tools`.
 - Off x86-64 Linux, `make user-test` and `make c-test` run their Linux side in Docker, and `c-test`
-  builds its C programs in it too.
+  builds its C programs in it too. `make busybox-test` always needs Docker. Its first run builds
+  busybox, about four minutes on an arm64 Mac.
 - Anywhere else, or if you'd rather not install anything: open the repo in GitHub Codespaces
   (Code, then Codespaces) or in VS Code's "Reopen in Container". `.devcontainer/` sets up the same
   toolchain CI uses.
@@ -54,6 +55,7 @@ make test    # everything CI runs
 | `make shell-test` | Types into the real shell over serial and PS/2 | You add a shell command, in Java or JavaScript |
 | `make js-test` | `tests/js`: JavaScript programs compiled by `jsc`; output must match node | You touch `compiler/.../duke/js` |
 | `make unit-test` | JUnit tests for the compiler | You touch `compiler/` |
+| `make busybox-test` | Busybox applets, from `CASES` in `tools/BusyboxTest.java`; output and exit status must match Linux | You add a system call busybox uses |
 
 A conformance test is a non-private, no-argument static method returning a primitive or a
 single-line `String`. Because HotSpot is the reference, behaviour and exception messages must match

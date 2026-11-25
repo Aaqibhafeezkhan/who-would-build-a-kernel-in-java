@@ -155,15 +155,34 @@ public class JsTests {
 
     /**
      * Executables, all on one FAT disk under {@code /folder}, each run by the shell's {@code run}
-     * in one boot of the kernel. What the shell prints between the command and its next prompt is
-     * the program's output, less the "exit status" line it adds for a nonzero exit. Leaves the
-     * serial log in {@code dir}.
+     * in one boot of the kernel. Leaves the serial log in {@code dir}.
      */
     static Map<String, Result> runAllOnDuke(Path dir, String folder, Map<String, byte[]> programs, String arguments) throws Exception {
         Map<String, byte[]> files = new LinkedHashMap<>();
         programs.forEach((name, bytes) -> files.put(folder + "/" + name, bytes));
+        List<String> lines = new ArrayList<>();
+        for (String name : files.keySet()) {
+            lines.add("run /" + name + arguments);
+        }
+        List<Result> ran = runLinesOnDuke(dir, folder + ".img", files, lines);
         Map<String, Result> results = new LinkedHashMap<>();
-        Path image = dir.resolve(folder + ".img");
+        List<String> names = new ArrayList<>(programs.keySet());
+        for (int i = 0; i < ran.size(); i++) {
+            results.put(names.get(i), ran.get(i));
+        }
+        return results;
+    }
+
+    /**
+     * Writes {@code files} to a FAT disk and types each of {@code lines}, all {@code run} commands,
+     * into the shell in one boot of the kernel. What the shell prints between the command and its
+     * next prompt is the program's output, less the "exit status" line it adds for a nonzero exit.
+     * A line that times out ends the boot, so the results can stop short of the lines. Leaves the
+     * serial log in {@code dir}.
+     */
+    static List<Result> runLinesOnDuke(Path dir, String imageName, Map<String, byte[]> files, List<String> lines) throws Exception {
+        List<Result> results = new ArrayList<>();
+        Path image = dir.resolve(imageName);
         FatImage.write(image, files, List.of());
         Postmortem postmortem = Postmortem.in(dir, ShellTest.ESP.resolveSibling("kernel.map"));
         List<String> command = new ArrayList<>(List.of("tools/qemu.sh", ShellTest.ESP.toString(), "-serial", "stdio",
@@ -181,13 +200,11 @@ public class JsTests {
                 throw new IllegalStateException("the kernel never reached its prompt:\n"
                         + ShellTest.clean(ShellTest.output.toString()).indent(4) + postmortem.report());
             }
-            for (String name : files.keySet()) {
-                String path = "/" + name;
+            for (String line : lines) {
                 int from = ShellTest.output.length();
-                ShellTest.type(qemu.getOutputStream(), "run " + path + arguments + "\n");
+                ShellTest.type(qemu.getOutputStream(), line + "\n");
                 if (!awaitPrompt(from)) {
-                    results.put(name.substring(folder.length() + 1), new Result("timed out:\n"
-                            + ShellTest.clean(ShellTest.output.substring(from)) + postmortem.report(), -1));
+                    results.add(new Result("timed out:\n" + ShellTest.clean(ShellTest.output.substring(from)) + postmortem.report(), -1));
                     break;
                 }
                 // The shell echoes each key with a cursor redraw, so skip the whole command line.
@@ -195,6 +212,7 @@ public class JsTests {
                 int start = shown.indexOf('\n') + 1;
                 String out = shown.substring(start, shown.indexOf("duke> ", start));
                 int exit = 0;
+                String path = line.split(" ")[1];
                 String status = path + ": exit status ";
                 int at = out.lastIndexOf(status);
                 if (at >= 0 && out.endsWith("\n") && out.indexOf('\n', at) == out.length() - 1) {
@@ -203,7 +221,7 @@ public class JsTests {
                 }
                 // The serial log is read a byte per char; programs print UTF-8, as the references' output is read.
                 out = new String(out.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
-                results.put(name.substring(folder.length() + 1), new Result(out, exit));
+                results.add(new Result(out, exit));
             }
         } finally {
             qemu.destroy();
