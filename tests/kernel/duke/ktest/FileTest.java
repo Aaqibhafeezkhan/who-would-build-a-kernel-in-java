@@ -247,6 +247,90 @@ final class FileTest {
         assertEquals(-SystemCalls.EBADF, t.result(highNew), "out-of-range newfd");
     }
 
+    static void testFcntlAccessModes() throws InterruptedException {
+        FileTest t = new FileTest();
+        int socket = t.call(41, 2, 1, 0); // socket(AF_INET, SOCK_STREAM, 0)
+        int open = t.call(SystemCalls.OPEN, t.string("/hello.txt"), 0, 0);
+        int pipe = t.call(SystemCalls.PIPE, t.p.data + STAT, 0, 0);
+        int consoleMode = t.call(SystemCalls.FCNTL, 1, SystemCalls.F_GETFL, 0);
+        int socketMode = t.call(SystemCalls.FCNTL, 3, SystemCalls.F_GETFL, 0);
+        int fileMode = t.call(SystemCalls.FCNTL, 4, SystemCalls.F_GETFL, 0);
+        int pipeReadMode = t.call(SystemCalls.FCNTL, 5, SystemCalls.F_GETFL, 0);
+        int pipeWriteMode = t.call(SystemCalls.FCNTL, 6, SystemCalls.F_GETFL, 0);
+        t.run();
+
+        assertEquals(3, t.result(socket), "socket");
+        assertEquals(4, t.result(open), "open");
+        assertEquals(0, t.result(pipe), "pipe");
+        assertEquals(SystemCalls.O_RDWR, t.result(consoleMode), "console access mode");
+        assertEquals(SystemCalls.O_RDWR, t.result(socketMode), "socket access mode");
+        assertEquals(SystemCalls.O_RDONLY, t.result(fileMode), "file access mode");
+        assertEquals(SystemCalls.O_RDONLY, t.result(pipeReadMode), "pipe read-end access mode");
+        assertEquals(SystemCalls.O_WRONLY, t.result(pipeWriteMode), "pipe write-end access mode");
+    }
+
+    static void testFcntlDescriptorFlags() throws InterruptedException {
+        FileTest t = new FileTest();
+        int open = t.call(SystemCalls.OPEN, t.string("/hello.txt"), 0, 0);
+        int initialFlags = t.call(SystemCalls.FCNTL, 3, SystemCalls.F_GETFD, 0);
+        int setCloseOnExec = t.call(SystemCalls.FCNTL, 3, SystemCalls.F_SETFD, SystemCalls.FD_CLOEXEC);
+        int descriptorFlags = t.call(SystemCalls.FCNTL, 3, SystemCalls.F_GETFD, 0);
+        t.run();
+
+        assertEquals(3, t.result(open), "open");
+        assertEquals(0, t.result(initialFlags), "FD_CLOEXEC starts clear");
+        assertEquals(0, t.result(setCloseOnExec), "F_SETFD");
+        assertEquals(SystemCalls.FD_CLOEXEC, t.result(descriptorFlags), "F_GETFD after F_SETFD");
+    }
+
+    static void testFcntlDuplication() throws InterruptedException {
+        FileTest t = new FileTest();
+        int open = t.call(SystemCalls.OPEN, t.string("/hello.txt"), 0, 0);
+        int pipe = t.call(SystemCalls.PIPE, t.p.data + STAT, 0, 0);
+        int duplicate = t.call(SystemCalls.FCNTL, 3, SystemCalls.F_DUPFD, 4);
+        int duplicateMode = t.call(SystemCalls.FCNTL, 6, SystemCalls.F_GETFL, 0);
+        int duplicateFlags = t.call(SystemCalls.FCNTL, 6, SystemCalls.F_GETFD, 0);
+        int duplicateCloexec = t.call(SystemCalls.FCNTL, 3, SystemCalls.F_DUPFD_CLOEXEC, 7);
+        int duplicateCloexecMode = t.call(SystemCalls.FCNTL, 7, SystemCalls.F_GETFL, 0);
+        int duplicateCloexecFlags = t.call(SystemCalls.FCNTL, 7, SystemCalls.F_GETFD, 0);
+        int duplicateWriteEnd = t.call(SystemCalls.FCNTL, 5, SystemCalls.F_DUPFD, 8);
+        int duplicateWriteMode = t.call(SystemCalls.FCNTL, 8, SystemCalls.F_GETFL, 0);
+        t.run();
+
+        assertEquals(3, t.result(open), "open");
+        assertEquals(0, t.result(pipe), "pipe");
+        assertEquals(6, t.result(duplicate), "F_DUPFD finds the lowest free descriptor above the minimum");
+        assertEquals(SystemCalls.O_RDONLY, t.result(duplicateMode), "F_DUPFD keeps access mode");
+        assertEquals(0, t.result(duplicateFlags), "F_DUPFD clears FD_CLOEXEC");
+        assertEquals(7, t.result(duplicateCloexec), "F_DUPFD_CLOEXEC");
+        assertEquals(SystemCalls.O_RDONLY, t.result(duplicateCloexecMode), "F_DUPFD_CLOEXEC keeps access mode");
+        assertEquals(SystemCalls.FD_CLOEXEC, t.result(duplicateCloexecFlags), "F_DUPFD_CLOEXEC sets FD_CLOEXEC");
+        assertEquals(8, t.result(duplicateWriteEnd), "F_DUPFD on pipe write end");
+        assertEquals(SystemCalls.O_WRONLY, t.result(duplicateWriteMode), "duplicated pipe keeps write access mode");
+    }
+
+    static void testFcntlErrors() throws InterruptedException {
+        FileTest t = new FileTest();
+        int open = t.call(SystemCalls.OPEN, t.string("/hello.txt"), 0, 0);
+        int unknownCommand = t.call(SystemCalls.FCNTL, 3, 999, 0);
+        int closedDescriptor = t.call(SystemCalls.FCNTL, 99, SystemCalls.F_GETFL, 0);
+        int closedUnknownCommand = t.call(SystemCalls.FCNTL, 99, 999, 0);
+        int closedDuplicate = t.call(SystemCalls.FCNTL, 99, SystemCalls.F_DUPFD, 0);
+        int setFlagsOnClosedDescriptor = t.call(SystemCalls.FCNTL, 99, SystemCalls.F_SETFD, 0);
+        int negativeMinimum = t.call(SystemCalls.FCNTL, 3, SystemCalls.F_DUPFD, -1);
+        int highMinimum = t.call(SystemCalls.FCNTL, 3, SystemCalls.F_DUPFD, 64);
+        t.run();
+
+        assertEquals(3, t.result(open), "open");
+        assertEquals(-SystemCalls.EINVAL, t.result(unknownCommand), "unknown fcntl command");
+        assertEquals(-SystemCalls.EBADF, t.result(closedDescriptor), "closed descriptor");
+        assertEquals(-SystemCalls.EBADF, t.result(closedUnknownCommand), "closed descriptor takes precedence");
+        assertEquals(-SystemCalls.EBADF, t.result(closedDuplicate), "F_DUPFD on a closed descriptor");
+        assertEquals(-SystemCalls.EBADF, t.result(setFlagsOnClosedDescriptor), "F_SETFD on closed descriptor");
+        assertEquals(-SystemCalls.EINVAL, t.result(negativeMinimum), "negative F_DUPFD minimum");
+        assertEquals(-SystemCalls.EINVAL, t.result(highMinimum), "out-of-range F_DUPFD minimum");
+    }
+
     /** iovecs at IOVECS as (offset into BUFFER, length) pairs, or an address of its own if the offset's negative. */
     private long iovecs(int at, long... vectors) {
         for (int i = 0; i < vectors.length; i += 2) {

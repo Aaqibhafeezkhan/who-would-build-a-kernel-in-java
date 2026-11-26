@@ -22,6 +22,7 @@ public final class SystemCalls {
     public static final int WRITE = 1;
     public static final int OPEN = 2;
     public static final int CLOSE = 3;
+    public static final int FCNTL = 72;
     public static final int FSTAT = 5;
     public static final int LSEEK = 8;
     public static final int MMAP = 9;
@@ -91,10 +92,19 @@ public final class SystemCalls {
     public static final int MAP_NORESERVE = 0x4000;
     public static final int WNOHANG = 1;
     public static final int O_ACCMODE = 3;
+    public static final int O_RDONLY = 0;
+    public static final int O_WRONLY = 1;
+    public static final int O_RDWR = 2;
     public static final int O_CREAT = 0x40;
     public static final int O_TRUNC = 0x200;
     public static final int O_DIRECTORY = 0x10000;
     public static final int O_CLOEXEC = 0x80000;
+    public static final int F_DUPFD = 0;
+    public static final int F_GETFD = 1;
+    public static final int F_SETFD = 2;
+    public static final int F_GETFL = 3;
+    public static final int F_DUPFD_CLOEXEC = 1030;
+    public static final int FD_CLOEXEC = 1;
     public static final int AT_FDCWD = -100;
     /** sizeof(struct stat) on x86-64. */
     public static final int STAT_BYTES = 144;
@@ -159,6 +169,8 @@ public final class SystemCalls {
             result = open((int) a0, a1, a2);
         } else if (number == CLOSE) {
             result = files().close(a0) ? 0 : -EBADF;
+        } else if (number == FCNTL) {
+            result = fcntl(a0, a1, a2);
         } else if (number == DUP) {
             result = files().dup(a0);
         } else if (number == DUP2) {
@@ -610,7 +622,7 @@ public final class SystemCalls {
         } catch (IllegalStateException e) {
             return -EIO;
         }
-        return files().add(file, (flags & O_CLOEXEC) != 0);
+        return files().add(file, (flags & O_CLOEXEC) != 0, O_RDONLY);
     }
 
     /** O_CLOEXEC only: there's no O_NONBLOCK yet, and a caller asking for it can't do without. */
@@ -624,8 +636,8 @@ public final class SystemCalls {
         boolean cloexec = flags != 0;
         Pipe pipe = new Pipe();
         FileTable table = files();
-        int read = table.add(pipe.reader, cloexec);
-        int write = read < 0 ? read : table.add(pipe.writer, cloexec);
+        int read = table.add(pipe.reader, cloexec, O_RDONLY);
+        int write = read < 0 ? read : table.add(pipe.writer, cloexec, O_WRONLY);
         // The descriptors hold the ends now, or nothing does and the pipe goes.
         pipe.reader.release();
         pipe.writer.release();
@@ -641,6 +653,29 @@ public final class SystemCalls {
             return -EFAULT;
         }
         return 0;
+    }
+
+    private static long fcntl(long fd, long command, long argument) {
+        FileTable table = files();
+        if (table.get(fd) == null) {
+            return -EBADF;
+        }
+        if (command == F_GETFL) {
+            return table.accessMode(fd);
+        }
+        if (command == F_GETFD) {
+            return table.descriptorFlags(fd);
+        }
+        if (command == F_SETFD) {
+            return table.setDescriptorFlags(fd, argument);
+        }
+        if (command == F_DUPFD) {
+            return table.dupFrom(fd, argument, false);
+        }
+        if (command == F_DUPFD_CLOEXEC) {
+            return table.dupFrom(fd, argument, true);
+        }
+        return -EINVAL;
     }
 
     private static long fstat(long fd, long buffer) {

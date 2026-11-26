@@ -52,6 +52,8 @@ public class BusyboxTest {
             List.of("sh", "-c", "x=duke; echo $x $((6 * 7))"),
             List.of("sh", "-c", "for i in 1 2 3; do echo $i; done"),
             List.of("sh", "-c", "echo $(echo nested)"),
+            List.of("printf", "%s-%d\\n", "a", "5"),
+            List.of("printf", "%x\\n", "255"),
             List.of("sh", "-c", "/bin/busybox echo piped | /bin/busybox wc -c"),
             List.of("sh", "-c", "exit 3"));
 

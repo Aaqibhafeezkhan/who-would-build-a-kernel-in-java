@@ -42,7 +42,7 @@ final class SocketCalls {
             return -Socket.EPROTONOSUPPORT;
         }
         Socket socket = new Socket();
-        int fd = SystemCalls.files().add(socket, (type & SOCK_CLOEXEC) != 0);
+        int fd = SystemCalls.files().add(socket, (type & SOCK_CLOEXEC) != 0, SystemCalls.O_RDWR);
         // The descriptor holds it now, or nothing does.
         socket.release();
         return fd;
@@ -94,7 +94,7 @@ final class SocketCalls {
         if (accepted == null) {
             return error[0];
         }
-        int newFd = SystemCalls.files().add(accepted, (flags & SOCK_CLOEXEC) != 0);
+        int newFd = SystemCalls.files().add(accepted, (flags & SOCK_CLOEXEC) != 0, SystemCalls.O_RDWR);
         accepted.release();
         if (newFd < 0 || address == 0) {
             return newFd;
