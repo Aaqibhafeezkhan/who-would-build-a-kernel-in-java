@@ -123,6 +123,34 @@ public final class Fat {
         return disk;
     }
 
+    /**
+     * A number for stat's st_ino and getdents' d_ino: the first cluster, which no two files or
+     * directories share. Empty files have none, so they share one that's never a cluster, since a
+     * d_ino of 0 reads as a deleted entry.
+     */
+    public long inode(Entry e) {
+        if (e.cluster != 0) {
+            return e.cluster;
+        }
+        return e.directory ? Math.max(rootCluster, 1) : 0x0FFFFFFF;
+    }
+
+    /** What getdents64 lists for the directory at {@code path}: its entries, with "." and ".." first in the root too. */
+    public List<Entry> listing(String path) {
+        Entry dir = lookup(path);
+        if (!dir.directory) {
+            throw new IllegalArgumentException(path + " is not a directory");
+        }
+        List<Entry> out = new ArrayList<>();
+        if (dir.cluster == rootCluster) {
+            // The root has no "." or ".." of its own on disk.
+            out.add(new Entry(".", true, 0, rootCluster));
+            out.add(new Entry("..", true, 0, rootCluster));
+        }
+        out.addAll(entries(dir.cluster));
+        return out;
+    }
+
     /** The entries of the directory at {@code path}. */
     public List<Entry> list(String path) {
         Entry dir = lookup(path);

@@ -312,7 +312,9 @@ ended is dropped as soon as it ends itself. The shell's `run` starts one and wai
 Each process has a table of 64 file descriptors, with the console on 0, 1 and 2. `open` and
 `openat` (relative to the root, since there's no working directory yet) read a FAT file whole into
 memory, so `read`, `lseek` and `fstat` never touch the disk; anything that would write gets
-`EROFS`. Reading the console runs the shell's line editor, so a program gets a line at a time,
+`EROFS`. A directory is listed when it's opened, for `getdents64`, with "." and ".." in the root
+too, as Linux has them. `stat` and `lstat` are the same, since FAT has no symlinks, and a file's
+inode number is its first cluster. Reading the console runs the shell's line editor, so a program gets a line at a time,
 echoed and editable, as from a terminal in canonical mode. The shell is waiting on the process
 meanwhile, so the two never read the keyboard at once.
 
@@ -370,12 +372,12 @@ spinning in user code, on whatever CPU it's on. A console read stops waiting for
 needs nothing extra, since the children it waits on are in the same group and wake it as they end.
 The wait status says SIGINT, and the memory goes back as for any exit.
 
-System calls so far: `read` (0), `write` (1), `open` (2), `close` (3), `fstat` (5), `lseek` (8),
+System calls so far: `read` (0), `write` (1), `open` (2), `close` (3), `stat` (4), `fstat` (5), `lstat` (6), `lseek` (8),
 `mmap` (9), `munmap` (11), `brk` (12), `readv` (19), `writev` (20), `pipe` (22), `dup` (32), `dup2` (33), `nanosleep` (35), `getpid` (39),
 `socket` (41), `connect` (42), `accept` (43), `sendto` (44), `recvfrom` (45), `shutdown` (48), `bind` (49), `listen` (50),
 `getsockname` (51), `getpeername` (52), `setsockopt` (54), `clone` (56), `fork` (57), `execve` (59), `exit` (60), `wait4` (61),
-`uname` (63), `getcwd` (79), `getppid` (110), `arch_prctl` (158), `gettid` (186), `futex` (202), `clock_gettime` (228), `exit_group` (231),
-`openat` (257), `accept4` (288) and `pipe2` (293), with Linux's numbers. `SystemCalls.dispatch` is entered from
+`uname` (63), `getcwd` (79), `getppid` (110), `arch_prctl` (158), `gettid` (186), `futex` (202), `getdents64` (217), `clock_gettime` (228), `exit_group` (231),
+`openat` (257), `newfstatat` (262), `accept4` (288) and `pipe2` (293), with Linux's numbers. `SystemCalls.dispatch` is entered from
 the syscall stub without a class-initialization check, so `SystemCalls` keeps no statics that need
 one. That's all `jsc` emits, so `make js-test` runs its x86 programs on Duke too: compiled on
 the host, put on a FAT disk, and run one after another through the shell in a single boot, with

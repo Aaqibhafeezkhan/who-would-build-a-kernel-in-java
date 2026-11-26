@@ -22,8 +22,12 @@ public final class SystemCalls {
     public static final int WRITE = 1;
     public static final int OPEN = 2;
     public static final int CLOSE = 3;
+    public static final int STAT = 4;
     public static final int FCNTL = 72;
     public static final int FSTAT = 5;
+    public static final int LSTAT = 6;
+    public static final int GETDENTS64 = 217;
+    public static final int NEWFSTATAT = 262;
     public static final int LSEEK = 8;
     public static final int MMAP = 9;
     public static final int READV = 19;
@@ -106,6 +110,8 @@ public final class SystemCalls {
     public static final int F_DUPFD_CLOEXEC = 1030;
     public static final int FD_CLOEXEC = 1;
     public static final int AT_FDCWD = -100;
+    static final int AT_SYMLINK_NOFOLLOW = 0x100;
+    static final int AT_EMPTY_PATH = 0x1000;
     /** sizeof(struct stat) on x86-64. */
     public static final int STAT_BYTES = 144;
     private static final int PATH_MAX = 4096;
@@ -181,6 +187,13 @@ public final class SystemCalls {
             result = pipe(a0, number == PIPE2 ? a1 : 0);
         } else if (number == FSTAT) {
             result = fstat(a0, a1);
+        } else if (number == STAT || number == LSTAT) {
+            result = stat(AT_FDCWD, a0, a1, 0);
+        } else if (number == NEWFSTATAT) {
+            result = stat((int) a0, a1, a2, Frame.register(frame, Frame.R10));
+        } else if (number == GETDENTS64) {
+            OpenFile file = files().get(a0);
+            result = file == null ? -EBADF : !userWritable(a1, a2) ? -EFAULT : file.getdents(a1, a2);
         } else if (number == LSEEK) {
             OpenFile file = files().get(a0);
             result = file == null ? -EBADF : file.seek(a1, (int) a2);
@@ -611,11 +624,11 @@ public final class SystemCalls {
         try {
             Fat.Entry entry = fs.lookup(path);
             if (entry.directory) {
-                file = OpenFile.directory();
+                file = OpenFile.directory(fs.listing(path), fs.inode(entry));
             } else if ((flags & O_DIRECTORY) != 0) {
                 return -ENOTDIR;
             } else {
-                file = OpenFile.file(fs.read(path));
+                file = OpenFile.file(fs.read(path), fs.inode(entry));
             }
         } catch (IllegalArgumentException e) {
             return -ENOENT;
@@ -686,12 +699,65 @@ public final class SystemCalls {
         if (!userWritable(buffer, STAT_BYTES)) {
             return -EFAULT;
         }
+        return putStat(buffer, file.mode(), file.size(), file.inode());
+    }
+
+    /**
+     * stat, lstat and newfstatat. There are no symlinks, so not following one changes nothing.
+     * With no working directory yet, a relative path with AT_FDCWD is relative to the root.
+     */
+    private static long stat(int directory, long pathAddress, long buffer, long flags) {
+        if ((flags & ~(long) (AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH)) != 0) {
+            return -EINVAL;
+        }
+        String path = userString(pathAddress);
+        if (path == null) {
+            return -EFAULT;
+        }
+        if (path.isEmpty() && (flags & AT_EMPTY_PATH) != 0 && directory != AT_FDCWD) {
+            return fstat(directory, buffer);
+        }
+        if (path.isEmpty() && (flags & AT_EMPTY_PATH) == 0) {
+            return -ENOENT;
+        }
+        if (path.length() >= PATH_MAX) {
+            return -ENAMETOOLONG;
+        }
+        if (directory != AT_FDCWD && !path.startsWith("/")) {
+            // Relative to a directory descriptor, which doesn't remember its path yet.
+            return files().get(directory) == null ? -EBADF : -EINVAL;
+        }
+        if (!userWritable(buffer, STAT_BYTES)) {
+            return -EFAULT;
+        }
+        Fat fs = Fat.mounted();
+        if (fs == null) {
+            return -ENOENT;
+        }
+        Fat.Entry entry;
+        try {
+            entry = fs.lookup(path);
+        } catch (IllegalArgumentException e) {
+            return -ENOENT;
+        } catch (IllegalStateException e) {
+            return -EIO;
+        }
+        if (path.endsWith("/") && !entry.directory) {
+            return -ENOTDIR;
+        }
+        return putStat(buffer, entry.directory ? OpenFile.MODE_DIRECTORY : OpenFile.MODE_REGULAR,
+                entry.directory ? 0 : entry.size, fs.inode(entry));
+    }
+
+    /** A struct stat, to user memory already checked writable. Times are all 0: FAT's aren't read yet. */
+    private static long putStat(long buffer, int mode, long size, long inode) {
         long[] stat = new long[STAT_BYTES / 8];
+        stat[1] = inode;                            // st_ino
         stat[2] = 1;                                // st_nlink
-        stat[3] = file.mode();                      // st_mode, then st_uid 0
-        stat[6] = file.size();                      // st_size
+        stat[3] = mode;                             // st_mode, then st_uid 0
+        stat[6] = size;                             // st_size
         stat[7] = 512;                              // st_blksize
-        stat[8] = (file.size() + 511) / 512;        // st_blocks
+        stat[8] = (size + 511) / 512;               // st_blocks
         return putLongs(buffer, stat) ? 0 : -EFAULT;
     }
 

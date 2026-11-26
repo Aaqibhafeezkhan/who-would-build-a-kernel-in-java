@@ -55,7 +55,20 @@ public class BusyboxTest {
             List.of("printf", "%s-%d\\n", "a", "5"),
             List.of("printf", "%x\\n", "255"),
             List.of("sh", "-c", "/bin/busybox echo piped | /bin/busybox wc -c"),
-            List.of("sh", "-c", "exit 3"));
+            List.of("sh", "-c", "exit 3"),
+            List.of("sh", "-c", "PATH=/bin; busybox echo found in PATH | busybox wc -c"),
+            List.of("sh", "-c", "test -d /docs && echo dir; [ -f /hello.txt ] && echo file; [ -e /nope ] || echo missing"),
+            List.of("ls", "-1", "/bin"),
+            List.of("ls", "-1a", "/docs/deeper"),
+            List.of("ls", "-1p", "/docs"),
+            List.of("ls", "-1R", "/docs"),
+            List.of("ls", "-1", "/hello.txt", "/docs"),
+            List.of("ls", "/nope"),
+            List.of("stat", "-c", "%n %s %F", "/hello.txt", "/empty.txt", "/big.bin"),
+            List.of("stat", "-c", "%n %F", "/docs"),
+            List.of("find", "/docs"),
+            List.of("find", "/docs", "-type", "f"),
+            List.of("sh", "-c", "/bin/busybox find /bin -name c* | /bin/busybox sort"));
 
     public static void main(String[] args) throws Exception {
         Path busybox = build();

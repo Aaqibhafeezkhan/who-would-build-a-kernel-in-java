@@ -1,5 +1,8 @@
 package duke.kernel.user;
 
+import duke.kernel.fs.Fat;
+import java.util.List;
+
 /**
  * What a file descriptor refers to: the console, a file or directory on the FAT disk, or one end
  * of a pipe. Several descriptors can refer to the same one, in one process or across a fork, and
@@ -20,12 +23,12 @@ abstract class OpenFile {
     /** The keyboard and screen: one, shared by every process and the shell. */
     static final OpenFile CONSOLE = new Terminal();
 
-    static OpenFile file(byte[] contents) {
-        return new DiskFile(contents, false);
+    static OpenFile file(byte[] contents, long inode) {
+        return new DiskFile(contents, null, inode);
     }
 
-    static OpenFile directory() {
-        return new DiskFile(null, true);
+    static OpenFile directory(List<Fat.Entry> listing, long inode) {
+        return new DiskFile(null, listing, inode);
     }
 
     /** Copies up to {@code count} bytes into user memory at {@code buffer}, already checked writable. */
@@ -42,6 +45,15 @@ abstract class OpenFile {
 
     long size() {
         return 0;
+    }
+
+    long inode() {
+        return 0;
+    }
+
+    /** linux_dirent64 records into user memory at {@code buffer}, already checked writable. */
+    long getdents(long buffer, long count) {
+        return -SystemCalls.ENOTDIR;
     }
 
     /** One more descriptor refers to this. */
