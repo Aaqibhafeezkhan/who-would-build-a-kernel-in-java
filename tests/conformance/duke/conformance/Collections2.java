@@ -388,6 +388,37 @@ final class Collections2 {
         return sb + " " + d.size() + " " + d.getFirst() + " " + d.getLast();
     }
 
+    static String arrayDequeRemoveLastAfterHeadWraps() {
+        Deque<Integer> d = new ArrayDeque<>();
+        d.addFirst(1);
+        d.addLast(2);
+        int removed = d.removeLast();
+        return removed + " " + d.getFirst() + " " + d.getLast() + " " + d.size();
+    }
+
+    static String arrayDequeEmptyThrows() {
+        Deque<String> d = new ArrayDeque<>();
+        String removeLast = "none";
+        String getFirst = "none";
+        String getLast = "none";
+        try {
+            d.removeLast();
+        } catch (NoSuchElementException e) {
+            removeLast = e.getClass().getName();
+        }
+        try {
+            d.getFirst();
+        } catch (NoSuchElementException e) {
+            getFirst = e.getClass().getName();
+        }
+        try {
+            d.getLast();
+        } catch (NoSuchElementException e) {
+            getLast = e.getClass().getName();
+        }
+        return removeLast + " " + getFirst + " " + getLast;
+    }
+
     static String arrayDequeEmpty() {
         Deque<String> d = new ArrayDeque<>();
         StringBuilder sb = new StringBuilder();
