@@ -120,16 +120,20 @@ public final class Network {
     static boolean poll() {
         boolean any = false;
         synchronized (LOCK) {
-            ArrayList<byte[]> back;
+            ArrayList<byte[]> back = null;
             synchronized (LOOPBACK) {
-                back = looped;
-                if (!back.isEmpty()) {
+                // Only a list taken out from under the lock is safe to walk: send adds to looped
+                // from any thread, the moment the lock is let go.
+                if (!looped.isEmpty()) {
+                    back = looped;
                     looped = new ArrayList<>();
                 }
             }
-            for (byte[] frame : back) {
-                any = true;
-                Ipv4.input(0, frame, true);
+            if (back != null) {
+                for (byte[] frame : back) {
+                    any = true;
+                    Ipv4.input(0, frame, true);
+                }
             }
             for (byte[] frame = nic == null ? null : nic.receive(); frame != null; frame = nic.receive()) {
                 any = true;
