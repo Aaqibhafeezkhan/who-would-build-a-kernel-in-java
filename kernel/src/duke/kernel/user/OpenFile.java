@@ -24,11 +24,11 @@ abstract class OpenFile {
     static final OpenFile CONSOLE = new Terminal();
 
     static OpenFile file(byte[] contents, long inode) {
-        return new DiskFile(contents, null, inode);
+        return new DiskFile(contents, null, null, inode);
     }
 
-    static OpenFile directory(List<Fat.Entry> listing, long inode) {
-        return new DiskFile(null, listing, inode);
+    static OpenFile directory(String path, List<Fat.Entry> listing, long inode) {
+        return new DiskFile(null, path, listing, inode);
     }
 
     /** Copies up to {@code count} bytes into user memory at {@code buffer}, already checked writable. */

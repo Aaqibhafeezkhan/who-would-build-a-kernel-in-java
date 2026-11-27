@@ -16,12 +16,15 @@ final class DiskFile extends OpenFile {
     private static final int DIRENT_HEADER = 19;
 
     private final byte[] contents;
+    /** A directory's, from the root with no "." or "..", for fchdir and the *at calls; null for a file. */
+    final String path;
     private final List<Fat.Entry> listing;
     private final long inode;
     private long position;
 
-    DiskFile(byte[] contents, List<Fat.Entry> listing, long inode) {
+    DiskFile(byte[] contents, String path, List<Fat.Entry> listing, long inode) {
         this.contents = contents;
+        this.path = path;
         this.listing = listing;
         this.inode = inode;
     }

@@ -88,6 +88,8 @@ public final class Process {
     private UserMode.Fault fault;
     private boolean interrupted;
     final FileTable files = new FileTable();
+    /** From the root, with no "." or ".." in it. Its threads share it, a fork copies it and execve keeps it. */
+    volatile String workingDirectory = "/";
 
     private Process(String name, Process parent, AddressSpace space, long entry, long stack, long[] registers,
             UserState state) {
@@ -188,6 +190,7 @@ public final class Process {
     static Process fork(Process parent, AddressSpace space, long rip, long rsp, long[] registers, UserState state) {
         Process child = new Process(parent.name, parent, space, rip, rsp, registers, state);
         child.files.copyFrom(parent.files);
+        child.workingDirectory = parent.workingDirectory;
         child.thread.start();
         return child;
     }

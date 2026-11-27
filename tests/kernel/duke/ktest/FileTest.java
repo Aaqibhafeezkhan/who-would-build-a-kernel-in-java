@@ -109,7 +109,9 @@ final class FileTest {
         int create = t.call(SystemCalls.OPEN, hello, SystemCalls.O_CREAT, 0);
         int kernel = t.call(SystemCalls.OPEN, Magic.addressOf(t), 0, 0);
         int notDir = t.call(SystemCalls.OPEN, hello, SystemCalls.O_DIRECTORY, 0);
-        int otherDir = t.call(SystemCalls.OPENAT, 3, hello, 0);
+        long relative = t.string("hello.txt");
+        int fromConsole = t.call(SystemCalls.OPENAT, 1, relative, 0);
+        int fromClosed = t.call(SystemCalls.OPENAT, 99, relative, 0);
         int seekConsole = t.call(SystemCalls.LSEEK, 1, 0, 0);
         int badFd = t.call(SystemCalls.READ, 99, buffer, 1);
         int file = t.call(SystemCalls.OPEN, hello, 0, 0);
@@ -125,7 +127,8 @@ final class FileTest {
         assertEquals(-SystemCalls.EROFS, t.result(create), "O_CREAT");
         assertEquals(-SystemCalls.EFAULT, t.result(kernel), "a path in kernel memory");
         assertEquals(-SystemCalls.ENOTDIR, t.result(notDir), "O_DIRECTORY on a file");
-        assertEquals(-SystemCalls.EINVAL, t.result(otherDir), "openat relative to a descriptor");
+        assertEquals(-SystemCalls.ENOTDIR, t.result(fromConsole), "openat relative to the console");
+        assertEquals(-SystemCalls.EBADF, t.result(fromClosed), "openat relative to fd 99");
         assertEquals(-SystemCalls.ESPIPE, t.result(seekConsole), "lseek on the console");
         assertEquals(-SystemCalls.EBADF, t.result(badFd), "fd 99");
         assertEquals(3, t.result(file), "open");

@@ -11,6 +11,8 @@ import duke.kernel.x86.UserState;
 import duke.rt.Magic;
 import duke.rt.Tib;
 import duke.kernel.time.Timer;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * System calls, numbered and passed the way Linux's are on x86-64: the number in rax, arguments
@@ -52,6 +54,8 @@ public final class SystemCalls {
     public static final int WAIT4 = 61;
     public static final int UNAME = 63;
     public static final int GETCWD = 79;
+    public static final int CHDIR = 80;
+    public static final int FCHDIR = 81;
     public static final int GETPPID = 110;
     public static final int ARCH_PRCTL = 158;
     public static final int GETTID = 186;
@@ -225,6 +229,10 @@ public final class SystemCalls {
             result = uname(a0);
         } else if (number == GETCWD) {
             result = getcwd(a0, a1);
+        } else if (number == CHDIR) {
+            result = chdir(a0);
+        } else if (number == FCHDIR) {
+            result = fchdir(a0);
         } else if (number == FORK) {
             result = fork(frame);
         } else if (number == CLONE) {
@@ -471,6 +479,10 @@ public final class SystemCalls {
         if (argv.length > MAX_ARGS || envp.length > MAX_ARGS) {
             return -E2BIG;
         }
+        if (path.length() >= PATH_MAX) {
+            return -ENAMETOOLONG;
+        }
+        path = resolve(AT_FDCWD, path);
         Fat fs = Fat.mounted();
         if (fs == null) {
             return -ENOENT;
@@ -603,9 +615,6 @@ public final class SystemCalls {
      * path is relative to the root.
      */
     private static long open(int directory, long pathAddress, long flags) {
-        if (directory != AT_FDCWD) {
-            return -EINVAL;
-        }
         if ((flags & (O_ACCMODE | O_CREAT | O_TRUNC)) != 0) {
             return -EROFS;
         }
@@ -613,8 +622,15 @@ public final class SystemCalls {
         if (path == null) {
             return -EFAULT;
         }
+        if (path.isEmpty()) {
+            return -ENOENT;
+        }
         if (path.length() >= PATH_MAX) {
             return -ENAMETOOLONG;
+        }
+        path = resolve(directory, path);
+        if (path == null) {
+            return notDirectory(directory);
         }
         Fat fs = Fat.mounted();
         if (fs == null) {
@@ -624,7 +640,7 @@ public final class SystemCalls {
         try {
             Fat.Entry entry = fs.lookup(path);
             if (entry.directory) {
-                file = OpenFile.directory(fs.listing(path), fs.inode(entry));
+                file = OpenFile.directory(withoutSlash(path), fs.listing(path), fs.inode(entry));
             } else if ((flags & O_DIRECTORY) != 0) {
                 return -ENOTDIR;
             } else {
@@ -702,10 +718,7 @@ public final class SystemCalls {
         return putStat(buffer, file.mode(), file.size(), file.inode());
     }
 
-    /**
-     * stat, lstat and newfstatat. There are no symlinks, so not following one changes nothing.
-     * With no working directory yet, a relative path with AT_FDCWD is relative to the root.
-     */
+    /** stat, lstat and newfstatat. There are no symlinks, so not following one changes nothing. */
     private static long stat(int directory, long pathAddress, long buffer, long flags) {
         if ((flags & ~(long) (AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH)) != 0) {
             return -EINVAL;
@@ -723,9 +736,9 @@ public final class SystemCalls {
         if (path.length() >= PATH_MAX) {
             return -ENAMETOOLONG;
         }
-        if (directory != AT_FDCWD && !path.startsWith("/")) {
-            // Relative to a directory descriptor, which doesn't remember its path yet.
-            return files().get(directory) == null ? -EBADF : -EINVAL;
+        path = resolve(directory, path);
+        if (path == null) {
+            return notDirectory(directory);
         }
         if (!userWritable(buffer, STAT_BYTES)) {
             return -EFAULT;
@@ -895,13 +908,124 @@ public final class SystemCalls {
         return true;
     }
     private static long getcwd(long buffer, long size) {
-        if (size < 2) {
+        Process self = Process.current();
+        String cwd = self == null ? "/" : self.workingDirectory;
+        // A char per byte, as userString read the path in.
+        byte[] bytes = new byte[cwd.length() + 1];
+        for (int i = 0; i < cwd.length(); i++) {
+            bytes[i] = (byte) cwd.charAt(i);
+        }
+        if (size < bytes.length) {
             return -ERANGE;
         }
-        if (!userWritable(buffer, 2)) {
+        if (!userWritable(buffer, bytes.length)) {
             return -EFAULT;
         }
-        return putBytes(buffer, new byte[] {'/', 0}, 0, 2) ? 2 : -EFAULT;
+        return putBytes(buffer, bytes, 0, bytes.length) ? bytes.length : -EFAULT;
+    }
+
+    private static long chdir(long pathAddress) {
+        Process self = Process.current();
+        String path = userString(pathAddress);
+        if (self == null) {
+            return -ENOSYS;
+        }
+        if (path == null) {
+            return -EFAULT;
+        }
+        if (path.isEmpty()) {
+            return -ENOENT;
+        }
+        if (path.length() >= PATH_MAX) {
+            return -ENAMETOOLONG;
+        }
+        path = resolve(AT_FDCWD, path);
+        Fat fs = Fat.mounted();
+        if (fs == null) {
+            return -ENOENT;
+        }
+        try {
+            if (!fs.lookup(path).directory) {
+                return -ENOTDIR;
+            }
+        } catch (IllegalArgumentException e) {
+            return -ENOENT;
+        } catch (IllegalStateException e) {
+            return -EIO;
+        }
+        self.workingDirectory = withoutSlash(path);
+        return 0;
+    }
+
+    private static long fchdir(long fd) {
+        Process self = Process.current();
+        if (self == null) {
+            return -ENOSYS;
+        }
+        OpenFile file = files().get(fd);
+        if (!(file instanceof DiskFile d) || d.path == null) {
+            return file == null ? -EBADF : -ENOTDIR;
+        }
+        self.workingDirectory = d.path;
+        return 0;
+    }
+
+    /**
+     * {@code path} from the root, with "." and ".." worked out: relative to the working directory, or
+     * to the directory open on {@code directory} unless that's AT_FDCWD. Null if it's neither.
+     */
+    private static String resolve(int directory, String path) {
+        String base;
+        if (path.startsWith("/")) {
+            base = "";
+        } else if (directory == AT_FDCWD) {
+            Process self = Process.current();
+            base = self == null ? "/" : self.workingDirectory;
+        } else if (files().get(directory) instanceof DiskFile d && d.path != null) {
+            base = d.path;
+        } else {
+            return null;
+        }
+        return normalize(base + "/" + path);
+    }
+
+    private static String withoutSlash(String path) {
+        return path.length() > 1 && path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
+    }
+
+    private static long notDirectory(int directory) {
+        return files().get(directory) == null ? -EBADF : -ENOTDIR;
+    }
+
+    /**
+     * Without symlinks, ".." can be taken lexically, as the parent of whatever came before it. Unlike
+     * Linux, that lets a missing directory before a ".." go unnoticed. A trailing slash is kept,
+     * since it means the path has to be a directory.
+     */
+    static String normalize(String path) {
+        List<String> parts = new ArrayList<>();
+        int start = 0;
+        for (int i = 0; i <= path.length(); i++) {
+            if (i == path.length() || path.charAt(i) == '/') {
+                String part = path.substring(start, i);
+                if (part.equals("..")) {
+                    if (!parts.isEmpty()) {
+                        parts.remove(parts.size() - 1);
+                    }
+                } else if (!part.isEmpty() && !part.equals(".")) {
+                    parts.add(part);
+                }
+                start = i + 1;
+            }
+        }
+        StringBuilder out = new StringBuilder();
+        for (String part : parts) {
+            out.append('/').append(part);
+        }
+        if (parts.isEmpty() || path.endsWith("/")) {
+            out.append('/');
+        }
+        return out.toString();
     }
 
     private static final int UTSNAME_FIELD_BYTES = 65;
